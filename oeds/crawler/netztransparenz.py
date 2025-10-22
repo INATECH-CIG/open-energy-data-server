@@ -13,17 +13,13 @@ The client expects that the environment contains the variables 'IPNT_CLIENT_ID' 
 with the credentials from the previous step.
 """
 
-import datetime as dt
-import io
 import logging
-import sys
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
-import pandas as pd
-import requests
 import sqlalchemy as sql
+import netztransparenz as nt
 
-from oeds.base_crawler import DEFAULT_CONFIG_LOCATION, ContinuousCrawler, load_config
+from oeds.base_crawler import DEFAULT_CONFIG_LOCATION, ContinuousCrawler, CrawlerConfig, load_config
 
 log = logging.getLogger("netztransparenz")
 log.setLevel(logging.INFO)
@@ -53,6 +49,10 @@ TEMPORAL_START = datetime(2011, 3, 31)
 class NetztransparenzCrawler(ContinuousCrawler):
     TIMEDELTA = timedelta(days=2)
 
+    def __init__(self, schema_name:str, config: CrawlerConfig):
+        super().__init__(schema_name, config)
+        self.initialize_token()
+
     def get_latest_data(self) -> datetime:
         return TEMPORAL_START
 
@@ -65,445 +65,94 @@ class NetztransparenzCrawler(ContinuousCrawler):
 
         IPNT_CLIENT_ID = self.config.get("ipnt_client_id")
         IPNT_CLIENT_SECRET = self.config.get("ipnt_client_secret")
-        ACCESS_TOKEN_URL = "https://identity.netztransparenz.de/users/connect/token"
-
-        # Ask for the token providing above authorization data
-        response = requests.post(
-            ACCESS_TOKEN_URL,
-            data={
-                "grant_type": "client_credentials",
-                "client_id": IPNT_CLIENT_ID,
-                "client_secret": IPNT_CLIENT_SECRET,
-            },
-        )
-
-        # Parse the token from the response if the response was OK
-        if response.ok:
-            self.token = response.json()["access_token"]
-        else:
-            message = (
-                f"Error retrieving token\n{response.status_code}:{response.reason}"
-            )
-            log.error(message)
-            raise Exception(f"Login failed. {message}")
+        self.client = nt.NetztransparenzClient(IPNT_CLIENT_ID, IPNT_CLIENT_SECRET, strict=False)
 
     def check_health(self):
-        url = "https://ds.netztransparenz.de/api/v1/health"
-        response = requests.get(url, headers={"Authorization": f"Bearer {self.token}"})
-        print(response.text, file=sys.stdout)
+        print(self.client.check_health())
 
     def forecast_solar(self):
-        # Prognose Solar contains historical data, relevant data is only found in the timeframe below
-        start_of_data = "2011-03-31T22:00:00"
-        end_of_data = "2022-12-14T23:00:00"
-        url = f"https://ds.netztransparenz.de/api/v1/data/prognose/Solar/{start_of_data}/{end_of_data}"
-        response = requests.get(url, headers={"Authorization": f"Bearer {self.token}"})
-        df = pd.read_csv(
-            io.StringIO(response.text),
-            sep=";",
-            header=0,
-            decimal=",",
-            thousands=".",
-            na_values=["N.A."],
-        )
-        df.rename(mapper=lambda x: database_friendly(x), axis="columns", inplace=True)
-        df["von"] = pd.to_datetime(
-            df["datum"] + " " + df["von"] + " " + df["zeitzone_von"],
-            format=csv_date_format,
-            utc=True,
-        ).dt.tz_localize(None)
-        df["bis"] = pd.to_datetime(
-            df["datum"] + " " + df["bis"] + " " + df["zeitzone_bis"],
-            format=csv_date_format,
-            utc=True,
-        ).dt.tz_localize(None)
-        df = df.drop(["datum", "zeitzone_von", "zeitzone_bis"], axis=1).set_index("von")
+        df = self.client.prognose_solar(transform_dates=True)
         with self.engine.begin() as conn:
             df.to_sql("prognose_solar", conn, if_exists="replace")
 
     def forecast_wind(self):
-        # Prognose Solar contains historical data, relevant data is only found in the timeframe below
-        start_of_data = "2011-03-31T22:00:00"
-        end_of_data = "2022-12-14T23:00:00"
-        url = f"https://ds.netztransparenz.de/api/v1/data/prognose/Wind/{start_of_data}/{end_of_data}"
-        response = requests.get(url, headers={"Authorization": f"Bearer {self.token}"})
-        df = pd.read_csv(
-            io.StringIO(response.text),
-            sep=";",
-            header=0,
-            decimal=",",
-            thousands=".",
-            na_values=["N.A."],
-        )
-        df.rename(mapper=lambda x: database_friendly(x), axis="columns", inplace=True)
-        df["von"] = pd.to_datetime(
-            df["datum"] + " " + df["von"] + " " + df["zeitzone_von"],
-            format=csv_date_format,
-            utc=True,
-        ).dt.tz_localize(None)
-        df["bis"] = pd.to_datetime(
-            df["datum"] + " " + df["bis"] + " " + df["zeitzone_bis"],
-            format=csv_date_format,
-            utc=True,
-        ).dt.tz_localize(None)
-        df = df.drop(["datum", "zeitzone_von", "zeitzone_bis"], axis=1).set_index("von")
+        df = self.client.prognose_wind(transform_dates=True)
         with self.engine.begin() as conn:
             df.to_sql("prognose_wind", conn, if_exists="replace")
 
-    def extrapolation_solar(self):
-        tablename = "hochrechnung_solar"
-        start_of_data = "2011-03-31T22:00:00"
-        start_of_data = self.find_latest(tablename, "bis", start_of_data)
-        end_of_data = dt.date.today() - dt.timedelta(days=1)
-        end_of_data = dt.datetime.combine(end_of_data, dt.datetime.min.time()).strftime(
-            api_date_format
+    def extrapolation_solar(self, begin: datetime | None = None, end: datetime | None = None):
+        df = self.client.hochrechnung_solar(begin, end, True)
+        df.rename(
+            mapper=lambda x: database_friendly(x),
+            axis="columns",
+            inplace=True,
         )
-        if start_of_data < end_of_data:
-            url = f"https://ds.netztransparenz.de/api/v1/data/hochrechnung/Solar/{start_of_data}/{end_of_data}"
-            response = requests.get(
-                url, headers={"Authorization": f"Bearer {self.token}"}
-            )
-            df = pd.read_csv(
-                io.StringIO(response.text),
-                sep=";",
-                header=0,
-                decimal=",",
-                thousands=".",
-                na_values=["N.A."],
-            )
-            df.rename(
-                mapper=lambda x: database_friendly(x),
-                axis="columns",
-                inplace=True,
-            )
-            df["von"] = pd.to_datetime(
-                df["datum"] + " " + df["von"] + " " + df["zeitzone_von"],
-                format=csv_date_format,
-                utc=True,
-            ).dt.tz_localize(None)
-            df["bis"] = pd.to_datetime(
-                df["datum"] + " " + df["bis"] + " " + df["zeitzone_bis"],
-                format=csv_date_format,
-                utc=True,
-            ).dt.tz_localize(None)
-            df = df.drop(["datum", "zeitzone_von", "zeitzone_bis"], axis=1).set_index(
-                "von"
-            )
-            with self.engine.begin() as conn:
-                df.to_sql(tablename, conn, if_exists="append")
+        with self.engine.begin() as conn:
+            df.to_sql("hochrechnung_solar", conn, if_exists="append")
 
-    def extrapolation_wind(self):
-        tablename = "hochrechnung_wind"
-        start_of_data = "2011-03-31T22:00:00"
-        start_of_data = self.find_latest(tablename, "bis", start_of_data)
-        end_of_data = dt.date.today() - dt.timedelta(days=1)
-        end_of_data = dt.datetime.combine(end_of_data, dt.datetime.min.time()).strftime(
-            api_date_format
+    def extrapolation_wind(self, begin: datetime | None = None, end: datetime | None = None):
+        df = self.client.hochrechnung_wind(begin, end, True)
+        df.rename(
+            mapper=lambda x: database_friendly(x),
+            axis="columns",
+            inplace=True,
         )
-        if start_of_data < end_of_data:
-            url = f"https://ds.netztransparenz.de/api/v1/data/hochrechnung/Wind/{start_of_data}/{end_of_data}"
-            response = requests.get(
-                url, headers={"Authorization": f"Bearer {self.token}"}
-            )
-            df = pd.read_csv(
-                io.StringIO(response.text),
-                sep=";",
-                header=0,
-                decimal=",",
-                thousands=".",
-                na_values=["N.A."],
-            )
-            df.rename(
-                mapper=lambda x: database_friendly(x),
-                axis="columns",
-                inplace=True,
-            )
-            df["von"] = pd.to_datetime(
-                df["datum"] + " " + df["von"] + " " + df["zeitzone_von"],
-                format=csv_date_format,
-                utc=True,
-            ).dt.tz_localize(None)
-            df["bis"] = pd.to_datetime(
-                df["datum"] + " " + df["bis"] + " " + df["zeitzone_bis"],
-                format=csv_date_format,
-                utc=True,
-            ).dt.tz_localize(None)
-            df = df.drop(["datum", "zeitzone_von", "zeitzone_bis"], axis=1).set_index(
-                "von"
-            )
-            with self.engine.begin() as conn:
-                df.to_sql(tablename, conn, if_exists="append")
+        with self.engine.begin() as conn:
+            df.to_sql("hochrechnung_wind", conn, if_exists="append")
 
-    def utilization_balancing_energy(self):
-        tablename = "vermarktung_inanspruchnahme_ausgleichsenergie"
-        start_of_data = "2011-03-31T22:00:00"
-        start_of_data = self.find_latest(tablename, "bis", start_of_data)
-        end_of_data = dt.date.today() - dt.timedelta(days=1)
-        end_of_data = dt.datetime.combine(end_of_data, dt.datetime.min.time()).strftime(
-            api_date_format
+    def utilization_balancing_energy(self, begin: datetime | None = None, end: datetime | None = None):
+        df = self.client.vermarktung_inanspruchnahme_ausgleichsenergie(begin, end, True)
+        df.rename(
+            mapper=lambda x: database_friendly(x),
+            axis="columns",
+            inplace=True,
         )
-        if start_of_data < end_of_data:
-            url = f"https://ds.netztransparenz.de/api/v1/data/vermarktung/InanspruchnahmeAusgleichsenergie/{start_of_data}/{end_of_data}"
-            response = requests.get(
-                url, headers={"Authorization": f"Bearer {self.token}"}
-            )
-            df = pd.read_csv(
-                io.StringIO(response.text),
-                sep=";",
-                header=0,
-                decimal=",",
-                thousands=".",
-                na_values=["N.A."],
-            )
-            df.rename(
-                mapper=lambda x: database_friendly(x),
-                axis="columns",
-                inplace=True,
-            )
-            df["von"] = pd.to_datetime(
-                df["datum"] + " " + df["von"] + " " + df["zeitzone_von"],
-                format=csv_date_format,
-                utc=True,
-            ).dt.tz_localize(None)
-            df["bis"] = pd.to_datetime(
-                df["datum"] + " " + df["bis"] + " " + df["zeitzone_bis"],
-                format=csv_date_format,
-                utc=True,
-            ).dt.tz_localize(None)
-            df = df.drop(["datum", "zeitzone_von", "zeitzone_bis"], axis=1).set_index(
-                "von"
-            )
-            with self.engine.begin() as conn:
-                df.to_sql(tablename, conn, if_exists="append")
+        with self.engine.begin() as conn:
+            df.to_sql("vermarktung_inanspruchnahme_ausgleichsenergie", conn, if_exists="append")
 
-    def redispatch(self):
-        tablename = "redispatch"
-        start_of_data = "2013-01-01T00:00:00"
-        start_of_data = self.find_latest(tablename, "bis", start_of_data)
-        end_of_data = dt.date.today() - dt.timedelta(days=1)
-        end_of_data = dt.datetime.combine(end_of_data, dt.datetime.min.time()).strftime(
-            api_date_format
-        )
-        if start_of_data < end_of_data:
-            url = f"https://ds.netztransparenz.de/api/v1/data/redispatch/{start_of_data}/{end_of_data}"
-            response = requests.get(
-                url, headers={"Authorization": f"Bearer {self.token}"}
-            )
-            df = pd.read_csv(
-                io.StringIO(response.text),
-                sep=";",
-                header=0,
-                decimal=",",
-                na_values=["N.A."],
-            )
-            df.rename(mapper=str.lower, axis="columns", inplace=True)
-            df["beginn"] = pd.to_datetime(
-                df["beginn_datum"] + " " + df["beginn_uhrzeit"],
-                format="%d.%m.%Y %H:%M",
-                utc=True,
-            ).dt.tz_localize(None)
-            df["ende"] = pd.to_datetime(
-                df["ende_datum"] + " " + df["ende_uhrzeit"],
-                format="%d.%m.%Y %H:%M",
-                utc=True,
-            ).dt.tz_localize(None)
-            df = df.drop(
-                [
-                    "beginn_datum",
-                    "beginn_uhrzeit",
-                    "ende_datum",
-                    "ende_uhrzeit",
-                    "zeitzone_von",
-                    "zeitzone_bis",
-                ],
-                axis=1,
-            ).set_index("beginn")
-            with self.engine.begin() as conn:
-                df.to_sql(tablename, conn, if_exists="append")
+    def redispatch(self, begin: datetime | None = None, end: datetime | None = None):
+        df = self.client.redispatch(begin, end, True)
+        df.rename(mapper=str.lower, axis="columns", inplace=True)
 
-    def gcc_balance(self):
-        tablename = "nrv_saldo"
-        start_of_data = "2014-01-01T00:00:00"
-        start_of_data = self.find_latest(tablename, "bis", start_of_data)
-        # Data might be subject to change for 20 Work days, so we wait 30 calendar days to crawl
-        end_of_data = dt.date.today() - dt.timedelta(days=30)
-        end_of_data = dt.datetime.combine(end_of_data, dt.datetime.min.time()).strftime(
-            api_date_format
-        )
-        if start_of_data < end_of_data:
-            url = f"https://ds.netztransparenz.de/api/v1/data/nrvsaldo/NRVSaldo/Qualitaetsgesichert/{start_of_data}/{end_of_data}"
-            response = requests.get(
-                url, headers={"Authorization": f"Bearer {self.token}"}
-            )
-            df = pd.read_csv(
-                io.StringIO(response.text),
-                sep=";",
-                header=0,
-                decimal=",",
-                na_values=["N.A."],
-            )
-            df.rename(mapper=str.lower, axis="columns", inplace=True)
-            df["von"] = pd.to_datetime(
-                df["datum"] + " " + df["von"] + " " + df["zeitzone"],
-                format="%d.%m.%Y %H:%M %Z",
-                utc=True,
-            ).dt.tz_localize(None)
-            df["bis"] = pd.to_datetime(
-                df["datum"] + " " + df["bis"] + " " + df["zeitzone"],
-                format="%d.%m.%Y %H:%M %Z",
-                utc=True,
-            ).dt.tz_localize(None)
-            df = df.drop(["datum", "zeitzone"], axis=1).set_index("von")
-            with self.engine.begin() as conn:
-                df.to_sql(tablename, conn, if_exists="append")
+        with self.engine.begin() as conn:
+            df.to_sql("redispatch", conn, if_exists="append")
 
-    def lfc_area_balance(self):
-        tablename = "rz_saldo"
-        start_of_data = "2014-01-01T00:00:00"
-        start_of_data = self.find_latest(tablename, "bis", start_of_data)
-        # Data might be subject to change for 20 Work days, so we wait 30 calendar days to crawl
-        end_of_data = dt.date.today() - dt.timedelta(days=30)
-        end_of_data = dt.datetime.combine(end_of_data, dt.datetime.min.time()).strftime(
-            api_date_format
-        )
-        if start_of_data < end_of_data:
-            url = f"https://ds.netztransparenz.de/api/v1/data/nrvsaldo/RZSaldo/Qualitaetsgesichert/{start_of_data}/{end_of_data}"
-            response = requests.get(
-                url, headers={"Authorization": f"Bearer {self.token}"}
-            )
-            df = pd.read_csv(
-                io.StringIO(response.text),
-                sep=";",
-                header=0,
-                decimal=",",
-                na_values=["N.A."],
-            )
-            df.rename(mapper=str.lower, axis="columns", inplace=True)
-            df["von"] = pd.to_datetime(
-                df["datum"] + " " + df["von"] + " " + df["zeitzone"],
-                format="%d.%m.%Y %H:%M %Z",
-                utc=True,
-            ).dt.tz_localize(None)
-            df["bis"] = pd.to_datetime(
-                df["datum"] + " " + df["bis"] + " " + df["zeitzone"],
-                format="%d.%m.%Y %H:%M %Z",
-                utc=True,
-            ).dt.tz_localize(None)
-            df = df.drop(["datum", "zeitzone"], axis=1).set_index("von")
-            with self.engine.begin() as conn:
-                df.to_sql(tablename, conn, if_exists="append")
+    def gcc_balance(self, begin: datetime, end: datetime):
+        df = self.client.nrvsaldo_nrvsaldo_qualitaetsgesichert(begin, end, True)
+        df.rename(mapper=str.lower, axis="columns", inplace=True)
+        with self.engine.begin() as conn:
+            df.to_sql("nrv_saldo", conn, if_exists="append")
 
-    def activated_automatic_balancing_capacity(self):
-        tablename = "aktivierte_srl"
-        start_of_data = "2013-01-01T00:00:00"
-        start_of_data = self.find_latest(tablename, "bis", start_of_data)
-        end_of_data = dt.date.today() - dt.timedelta(days=30)
-        end_of_data = dt.datetime.combine(end_of_data, dt.datetime.min.time()).strftime(
-            api_date_format
-        )
-        if start_of_data < end_of_data:
-            url = f"https://ds.netztransparenz.de/api/v1/data/nrvsaldo/AktivierteSRL/Qualitaetsgesichert/{start_of_data}/{end_of_data}"
-            response = requests.get(
-                url, headers={"Authorization": f"Bearer {self.token}"}
-            )
-            df = pd.read_csv(
-                io.StringIO(response.text),
-                sep=";",
-                header=0,
-                decimal=",",
-                na_values=["N.A."],
-            )
-            df.rename(mapper=str.lower, axis="columns", inplace=True)
-            df["von"] = pd.to_datetime(
-                df["datum"] + " " + df["von"] + " " + df["zeitzone"],
-                format="%d.%m.%Y %H:%M %Z",
-                utc=True,
-            ).dt.tz_localize(None)
-            df["bis"] = pd.to_datetime(
-                df["datum"] + " " + df["bis"] + " " + df["zeitzone"],
-                format="%d.%m.%Y %H:%M %Z",
-                utc=True,
-            ).dt.tz_localize(None)
-            df = df.drop(["datum", "zeitzone"], axis=1).set_index("von")
-            with self.engine.begin() as conn:
-                df.to_sql(tablename, conn, if_exists="append")
+    def lfc_area_balance(self, begin: datetime, end: datetime):
+        df = self.client.nrvsaldo_rzsaldo_qualitaetsgesichert(begin, end, True)
+        df.rename(mapper=str.lower, axis="columns", inplace=True)
+        with self.engine.begin() as conn:
+            df.to_sql("rz_saldo", conn, if_exists="append")
 
-    def activated_manual_balancing_capacity(self):
-        tablename = "aktivierte_mrl"
-        start_of_data = "2013-01-01T00:00:00"
-        start_of_data = self.find_latest(tablename, "bis", start_of_data)
-        end_of_data = dt.date.today() - dt.timedelta(days=30)
-        end_of_data = dt.datetime.combine(end_of_data, dt.datetime.min.time()).strftime(
-            api_date_format
-        )
-        if start_of_data < end_of_data:
-            url = f"https://ds.netztransparenz.de/api/v1/data/nrvsaldo/AktivierteMRL/Qualitaetsgesichert/{start_of_data}/{end_of_data}"
-            response = requests.get(
-                url, headers={"Authorization": f"Bearer {self.token}"}
-            )
-            df = pd.read_csv(
-                io.StringIO(response.text),
-                sep=";",
-                header=0,
-                decimal=",",
-                na_values=["N.A."],
-            )
-            df.rename(mapper=str.lower, axis="columns", inplace=True)
-            df["von"] = pd.to_datetime(
-                df["datum"] + " " + df["von"] + " " + df["zeitzone"],
-                format="%d.%m.%Y %H:%M %Z",
-                utc=True,
-            ).dt.tz_localize(None)
-            df["bis"] = pd.to_datetime(
-                df["datum"] + " " + df["bis"] + " " + df["zeitzone"],
-                format="%d.%m.%Y %H:%M %Z",
-                utc=True,
-            ).dt.tz_localize(None)
-            df = df.drop(["datum", "zeitzone"], axis=1).set_index("von")
-            with self.engine.begin() as conn:
-                df.to_sql(tablename, conn, if_exists="append")
+    def activated_automatic_balancing_capacity(self, begin: datetime, end: datetime):
+        df = self.client.nrvsaldo_aktivierte_srl_qualitaetsgesichert(begin, end, True)
+        df.rename(mapper=str.lower, axis="columns", inplace=True)
+        with self.engine.begin() as conn:
+            df.to_sql("aktivierte_srl", conn, if_exists="append")
 
-    def value_of_avoided_activation(self):
-        tablename = "value_of_avoided_activation"
-        start_of_data = "2023-11-01T00:00:00"
-        start_of_data = self.find_latest(tablename, "bis", start_of_data)
-        end_of_data = dt.date.today() - dt.timedelta(days=30)
-        end_of_data = dt.datetime.combine(end_of_data, dt.datetime.min.time()).strftime(
-            api_date_format
-        )
-        if start_of_data < end_of_data:
-            url = f"https://ds.netztransparenz.de/api/v1/data/nrvsaldo/VoAA/Qualitaetsgesichert/{start_of_data}/{end_of_data}"
-            response = requests.get(
-                url, headers={"Authorization": f"Bearer {self.token}"}
-            )
-            df = pd.read_csv(
-                io.StringIO(response.text),
-                sep=";",
-                header=0,
-                decimal=",",
-                na_values=["N.A."],
-            )
-            df.rename(mapper=str.lower, axis="columns", inplace=True)
-            df["von"] = pd.to_datetime(
-                df["datum"] + " " + df["von"] + " " + df["zeitzone"],
-                format="%d.%m.%Y %H:%M %Z",
-                utc=True,
-            ).dt.tz_localize(None)
-            df["bis"] = pd.to_datetime(
-                df["datum"] + " " + df["bis"] + " " + df["zeitzone"],
-                format="%d.%m.%Y %H:%M %Z",
-                utc=True,
-            ).dt.tz_localize(None)
-            df = df.drop(["datum", "zeitzone"], axis=1).set_index("von")
-            with self.engine.begin() as conn:
-                df.to_sql(tablename, conn, if_exists="append")
+    def activated_manual_balancing_capacity(self, begin: datetime, end: datetime):
+        df = self.client.nrvsaldo_aktivierte_mrl_qualitaetsgesichert(begin, end, True)
+        df.rename(mapper=str.lower, axis="columns", inplace=True)
+        with self.engine.begin() as conn:
+            df.to_sql("aktivierte_mrl", conn, if_exists="append")
+
+    def value_of_avoided_activation(self, begin: datetime, end: datetime):
+        df = self.client.nrvsaldo_voaa_qualitaetsgesichert(begin, end, True)
+        df.rename(mapper=str.lower, axis="columns", inplace=True)
+        with self.engine.begin() as conn:
+            df.to_sql("value_of_avoided_activation", conn, if_exists="append")
 
     def find_latest(self, tablename: str, column_name: str, default):
         try:
             with self.engine.begin() as conn:
                 query = sql.text(f"SELECT max({column_name}) FROM {tablename}")
                 result = conn.execute(query).scalar() or default
-                return result.strftime(api_date_format)
+                return result
         except Exception:
             return default
 
@@ -529,8 +178,6 @@ class NetztransparenzCrawler(ContinuousCrawler):
     def crawl_temporal(
         self, begin: datetime | None = None, end: datetime | None = None
     ):
-        # TODO begin and end is not respected
-        log.error("BEGIN AND END IS CURRENTLY NOT RESPECTED")
         # crawler.check_health()
         if not self.check_table_exists("prognose_solar"):
             log.info("No Solar")
@@ -538,21 +185,38 @@ class NetztransparenzCrawler(ContinuousCrawler):
         if not self.check_table_exists("prognose_wind"):
             log.info("No Wind")
             self.forecast_wind()
-        self.extrapolation_solar()
-        self.extrapolation_wind()
-        self.utilization_balancing_energy()
-        self.redispatch()
-        self.gcc_balance()
-        self.lfc_area_balance()
-        self.activated_automatic_balancing_capacity()
-        self.activated_manual_balancing_capacity()
-        self.value_of_avoided_activation()
+        
+        temporal_funcs = [
+            #0=function, 1=start of data, 2=crawling delay, 3=table name, 4=index name in table
+            (self.extrapolation_wind, datetime(2011, 3, 31, 22, 0), timedelta(days=1), "hochrechnung_wind", "von"),
+            (self.extrapolation_solar, datetime(2011, 3, 31, 22, 0), timedelta(days=1), "hochrechnung_solar", "von"),
+            (self.utilization_balancing_energy, datetime(2011, 3, 31, 22, 0), timedelta(days=1), "vermarktung_inanspruchnahme_ausgleichsenergie", "von"),
+            (self.redispatch, datetime(2021, 10, 1, 0, 0), timedelta(days=1), "redispatch", "beginn"),
+            (self.activated_automatic_balancing_capacity, datetime(2014, 2, 25, 23, 0), timedelta(days=1), "aktivierte_srl", "von"),
+            (self.activated_manual_balancing_capacity, datetime(2011, 6, 26, 22, 0), timedelta(days=1), "aktivierte_mrl", "von"),
+            (self.value_of_avoided_activation, datetime(2023, 11, 1, 0, 0), timedelta(days=1), "value_of_avoided_activation", "von"),
+            (self.gcc_balance, datetime(2023, 11, 1, 0, 0), timedelta(days=30), "nrv_saldo", "von"),
+            (self.lfc_area_balance, datetime(2023, 11, 1, 0, 0), timedelta(days=30), "rz_saldo", "von"),
+            ]
+        for func_tuple in temporal_funcs:
+            log.info(f"Processing Table {func_tuple[3]}")
+            latest = self.find_latest(func_tuple[3], func_tuple[4], func_tuple[1])
+            current_begin = begin
+            current_end = end
+            if current_begin is None or current_begin.astimezone(UTC) < latest.astimezone(UTC):
+                current_begin = latest.astimezone(UTC)
+            earliest = datetime.now(tz=UTC) - func_tuple[2]
+            if current_end is None or current_end > earliest:
+                current_end = earliest 
+            log.info(f"Crawling from {current_begin} to {current_end}")
+            func_tuple[0](current_begin, current_end)
 
+        
 
 if __name__ == "__main__":
     logging.basicConfig()
 
     config = load_config(DEFAULT_CONFIG_LOCATION)
-    craw = NetztransparenzCrawler("netztransparenz", config=config)
-    craw.crawl_temporal()
-    craw.set_metadata(metadata_info)
+    crawl = NetztransparenzCrawler("netztransparenz", config=config)
+    crawl.crawl_temporal()
+    crawl.set_metadata(metadata_info)
