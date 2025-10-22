@@ -16,10 +16,15 @@ with the credentials from the previous step.
 import logging
 from datetime import UTC, datetime, timedelta
 
-import sqlalchemy as sql
 import netztransparenz as nt
+import sqlalchemy as sql
 
-from oeds.base_crawler import DEFAULT_CONFIG_LOCATION, ContinuousCrawler, CrawlerConfig, load_config
+from oeds.base_crawler import (
+    DEFAULT_CONFIG_LOCATION,
+    ContinuousCrawler,
+    CrawlerConfig,
+    load_config,
+)
 
 log = logging.getLogger("netztransparenz")
 log.setLevel(logging.INFO)
@@ -49,7 +54,7 @@ TEMPORAL_START = datetime(2011, 3, 31)
 class NetztransparenzCrawler(ContinuousCrawler):
     TIMEDELTA = timedelta(days=2)
 
-    def __init__(self, schema_name:str, config: CrawlerConfig):
+    def __init__(self, schema_name: str, config: CrawlerConfig):
         super().__init__(schema_name, config)
         self.initialize_token()
 
@@ -65,7 +70,9 @@ class NetztransparenzCrawler(ContinuousCrawler):
 
         IPNT_CLIENT_ID = self.config.get("ipnt_client_id")
         IPNT_CLIENT_SECRET = self.config.get("ipnt_client_secret")
-        self.client = nt.NetztransparenzClient(IPNT_CLIENT_ID, IPNT_CLIENT_SECRET, strict=False)
+        self.client = nt.NetztransparenzClient(
+            IPNT_CLIENT_ID, IPNT_CLIENT_SECRET, strict=False
+        )
 
     def check_health(self):
         print(self.client.check_health())
@@ -80,7 +87,9 @@ class NetztransparenzCrawler(ContinuousCrawler):
         with self.engine.begin() as conn:
             df.to_sql("prognose_wind", conn, if_exists="replace")
 
-    def extrapolation_solar(self, begin: datetime | None = None, end: datetime | None = None):
+    def extrapolation_solar(
+        self, begin: datetime | None = None, end: datetime | None = None
+    ):
         df = self.client.hochrechnung_solar(begin, end, True)
         df.rename(
             mapper=lambda x: database_friendly(x),
@@ -90,7 +99,9 @@ class NetztransparenzCrawler(ContinuousCrawler):
         with self.engine.begin() as conn:
             df.to_sql("hochrechnung_solar", conn, if_exists="append")
 
-    def extrapolation_wind(self, begin: datetime | None = None, end: datetime | None = None):
+    def extrapolation_wind(
+        self, begin: datetime | None = None, end: datetime | None = None
+    ):
         df = self.client.hochrechnung_wind(begin, end, True)
         df.rename(
             mapper=lambda x: database_friendly(x),
@@ -100,7 +111,9 @@ class NetztransparenzCrawler(ContinuousCrawler):
         with self.engine.begin() as conn:
             df.to_sql("hochrechnung_wind", conn, if_exists="append")
 
-    def utilization_balancing_energy(self, begin: datetime | None = None, end: datetime | None = None):
+    def utilization_balancing_energy(
+        self, begin: datetime | None = None, end: datetime | None = None
+    ):
         df = self.client.vermarktung_inanspruchnahme_ausgleichsenergie(begin, end, True)
         df.rename(
             mapper=lambda x: database_friendly(x),
@@ -108,7 +121,11 @@ class NetztransparenzCrawler(ContinuousCrawler):
             inplace=True,
         )
         with self.engine.begin() as conn:
-            df.to_sql("vermarktung_inanspruchnahme_ausgleichsenergie", conn, if_exists="append")
+            df.to_sql(
+                "vermarktung_inanspruchnahme_ausgleichsenergie",
+                conn,
+                if_exists="append",
+            )
 
     def redispatch(self, begin: datetime | None = None, end: datetime | None = None):
         df = self.client.redispatch(begin, end, True)
@@ -185,33 +202,88 @@ class NetztransparenzCrawler(ContinuousCrawler):
         if not self.check_table_exists("prognose_wind"):
             log.info("No Wind")
             self.forecast_wind()
-        
+
         temporal_funcs = [
-            #0=function, 1=start of data, 2=crawling delay, 3=table name, 4=index name in table
-            (self.extrapolation_wind, datetime(2011, 3, 31, 22, 0), timedelta(days=1), "hochrechnung_wind", "von"),
-            (self.extrapolation_solar, datetime(2011, 3, 31, 22, 0), timedelta(days=1), "hochrechnung_solar", "von"),
-            (self.utilization_balancing_energy, datetime(2011, 3, 31, 22, 0), timedelta(days=1), "vermarktung_inanspruchnahme_ausgleichsenergie", "von"),
-            (self.redispatch, datetime(2021, 10, 1, 0, 0), timedelta(days=1), "redispatch", "beginn"),
-            (self.activated_automatic_balancing_capacity, datetime(2014, 2, 25, 23, 0), timedelta(days=1), "aktivierte_srl", "von"),
-            (self.activated_manual_balancing_capacity, datetime(2011, 6, 26, 22, 0), timedelta(days=1), "aktivierte_mrl", "von"),
-            (self.value_of_avoided_activation, datetime(2023, 11, 1, 0, 0), timedelta(days=1), "value_of_avoided_activation", "von"),
-            (self.gcc_balance, datetime(2023, 11, 1, 0, 0), timedelta(days=30), "nrv_saldo", "von"),
-            (self.lfc_area_balance, datetime(2023, 11, 1, 0, 0), timedelta(days=30), "rz_saldo", "von"),
-            ]
+            # 0=function, 1=start of data, 2=crawling delay, 3=table name, 4=index name in table
+            (
+                self.extrapolation_wind,
+                datetime(2011, 3, 31, 22, 0),
+                timedelta(days=1),
+                "hochrechnung_wind",
+                "von",
+            ),
+            (
+                self.extrapolation_solar,
+                datetime(2011, 3, 31, 22, 0),
+                timedelta(days=1),
+                "hochrechnung_solar",
+                "von",
+            ),
+            (
+                self.utilization_balancing_energy,
+                datetime(2011, 3, 31, 22, 0),
+                timedelta(days=1),
+                "vermarktung_inanspruchnahme_ausgleichsenergie",
+                "von",
+            ),
+            (
+                self.redispatch,
+                datetime(2021, 10, 1, 0, 0),
+                timedelta(days=1),
+                "redispatch",
+                "beginn",
+            ),
+            (
+                self.activated_automatic_balancing_capacity,
+                datetime(2014, 2, 25, 23, 0),
+                timedelta(days=1),
+                "aktivierte_srl",
+                "von",
+            ),
+            (
+                self.activated_manual_balancing_capacity,
+                datetime(2011, 6, 26, 22, 0),
+                timedelta(days=1),
+                "aktivierte_mrl",
+                "von",
+            ),
+            (
+                self.value_of_avoided_activation,
+                datetime(2023, 11, 1, 0, 0),
+                timedelta(days=1),
+                "value_of_avoided_activation",
+                "von",
+            ),
+            (
+                self.gcc_balance,
+                datetime(2023, 11, 1, 0, 0),
+                timedelta(days=30),
+                "nrv_saldo",
+                "von",
+            ),
+            (
+                self.lfc_area_balance,
+                datetime(2023, 11, 1, 0, 0),
+                timedelta(days=30),
+                "rz_saldo",
+                "von",
+            ),
+        ]
         for func_tuple in temporal_funcs:
             log.info(f"Processing Table {func_tuple[3]}")
             latest = self.find_latest(func_tuple[3], func_tuple[4], func_tuple[1])
             current_begin = begin
             current_end = end
-            if current_begin is None or current_begin.astimezone(UTC) < latest.astimezone(UTC):
+            if current_begin is None or (
+                current_begin.astimezone(UTC) < latest.astimezone(UTC)
+                ):
                 current_begin = latest.astimezone(UTC)
             earliest = datetime.now(tz=UTC) - func_tuple[2]
             if current_end is None or current_end > earliest:
-                current_end = earliest 
+                current_end = earliest
             log.info(f"Crawling from {current_begin} to {current_end}")
             func_tuple[0](current_begin, current_end)
 
-        
 
 if __name__ == "__main__":
     logging.basicConfig()

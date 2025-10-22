@@ -5,15 +5,13 @@
 import argparse
 import logging
 from pathlib import Path
-from typing import TypedDict
 
 from oeds.base_crawler import (
     BaseCrawler,
     ContinuousCrawler,
-    CrawlerConfig,
     DownloadOnceCrawler,
-    load_config,
     empty_config,
+    load_config,
 )
 
 log = logging.getLogger("OEDS")

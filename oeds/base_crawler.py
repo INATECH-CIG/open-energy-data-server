@@ -29,9 +29,10 @@ def load_config(config_path: Path | str = "config.yml") -> CrawlerConfig:
         config = yaml.safe_load(f)
     return config
 
+
 def empty_config() -> CrawlerConfig:
     return {
-        "db_uri" : "",
+        "db_uri": "",
         "entsoe_api_key": "",
         "gie_api_key": "",
         "ipnt_client_id": "",

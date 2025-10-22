@@ -42,7 +42,7 @@ crawlers: dict[str, type[BaseCrawler]] = {
     "ladesaeulenregister": LadesaeulenregisterCrawler,
     "londondatastore": LondonLoadData,
     "mastr": MastrDownloader,
-    "netztransparenz" : NetztransparenzCrawler,
+    "netztransparenz": NetztransparenzCrawler,
     "ninja": NinjaCrawler,
     "opec": OpecDownloader,
     "opsd": OpsdCrawler,
