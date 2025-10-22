@@ -52,7 +52,8 @@ For more information, check out `oeds -h`.
 
 ## Using the ECMWF crawler
 
-If you want to use the ECMWF crawler you need to create an account at [copernicus](https://cds.climate.copernicus.eu) to get an API key which allows you to query the API of copernicus. Follow the [instructions](https://cds.climate.copernicus.eu/api-how-to) of copernicus for that.
+If you want to use the ECMWF crawler you need to create an account at [copernicus](https://cds.climate.copernicus.eu) to get an API key which allows you to query the API of copernicus.
+Follow the [instructions](https://cds.climate.copernicus.eu/api-how-to) of copernicus for that.
 
 ## TimeScaleDB
 
@@ -100,7 +101,3 @@ Just send a PR and add a new file in the crawler folder with your implemented `C
 You can cite the `open-energy-data-server` through the Conference proceedings:
 
 > Maurer, F., Sejdija, J., & Sander, V. (2024, February 2). Decentralized energy data storages through an Open Energy Database Server. 1st NFDI4Energy Conference (NFDI4Energy), Hanover, Germany. https://doi.org/10.5281/zenodo.10607895
-
-## Using the ECMWF crawler
-
-If you want to use the ECMWF crawler you need to create an account at [copernicus](https://cds.climate.copernicus.eu) to get an API key which allows you to query the API of copernicus. Follow the [instructions](https://cds.climate.copernicus.eu/api-how-to) of copernicus for that.
