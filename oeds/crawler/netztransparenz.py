@@ -276,7 +276,7 @@ class NetztransparenzCrawler(ContinuousCrawler):
             current_end = end
             if current_begin is None or (
                 current_begin.astimezone(UTC) < latest.astimezone(UTC)
-                ):
+            ):
                 current_begin = latest.astimezone(UTC)
             earliest = datetime.now(tz=UTC) - func_tuple[2]
             if current_end is None or current_end > earliest:
