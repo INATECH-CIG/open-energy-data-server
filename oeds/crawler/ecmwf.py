@@ -335,21 +335,23 @@ class EcmwfCrawler(ContinuousCrawler):
 
         last_date = self.get_latest_data()
         last_date += timedelta(hours=1)
+        if last_date > begin:
+            begin = last_date
 
         # the requests are build from 00:00 - 23:00 for each day
         # however, for recent dates the cds API delivers data up until the latest hour of the day it can deliver
         # that is why a check is necessary to first make sure that the database has dates up until 23:00
 
-        if last_date.hour != 23:
+        if begin.hour != 23:
             log.info("Creating request for single day")
-            request = single_day_request(last_date)
+            request = single_day_request(begin)
             log.info(f"The current request running: {request}")
             save_ecmwf_request_to_file(request, self.ecmwf_client)
             build_dataframe(self.engine, request)
-            last_date = self.get_latest_data()
+            begin = self.get_latest_data()
 
         dates = []
-        for single_date in daterange(last_date):
+        for single_date in daterange(begin, end):
             dates.append(single_date)
 
         for request in request_list_from_dates(dates):
