@@ -68,10 +68,15 @@ class NetztransparenzCrawler(ContinuousCrawler):
         # add your Client-ID and Client-secret from the API Client configuration GUI to
         # your environment variable first
 
-        IPNT_CLIENT_ID = self.config.get("ipnt_client_id")
-        IPNT_CLIENT_SECRET = self.config.get("ipnt_client_secret")
+        ipnt_client_id = self.config.get("ipnt_client_id")
+        ipnt_client_secret = self.config.get("ipnt_client_secret")
+        if not ipnt_client_id or not ipnt_client_secret:
+            raise ValueError(
+                "Missing client credentials for netztransparenz. Please provide ipnt_client_id and ipnt_client_secret."
+            )
+
         self.client = nt.NetztransparenzClient(
-            IPNT_CLIENT_ID, IPNT_CLIENT_SECRET, strict=False
+            ipnt_client_id, ipnt_client_secret, strict=False
         )
 
     def check_health(self):
