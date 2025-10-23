@@ -25,6 +25,13 @@ from oeds.base_crawler import (
     load_config,
 )
 
+##################
+# IMPORTANT NOTE #
+##################
+# in order for this crawler to run, you need to run the 'public' crawler first
+# see readme
+# https://github.com/open-energy-data-server/open-energy-data-server/blob/main/README.md#using-the-ecmwf-crawler
+
 """
     Note that only requests with no more that 1000 items at a time are valid.
     See the following link for further information:
