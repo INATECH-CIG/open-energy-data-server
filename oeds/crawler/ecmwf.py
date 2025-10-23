@@ -249,6 +249,7 @@ def daterange(start_date: datetime, end_date: datetime = None):
 
 def request_list_from_dates(dates: list[datetime]) -> list[dict]:
     dates_dataframe = pd.DataFrame(dates, columns=["Date"])
+    dates_dataframe["Date"] = pd.to_datetime(dates_dataframe["Date"])
     grouped_by_months = dates_dataframe.groupby(pd.Grouper(key="Date", freq="ME"))
     months = [group for _, group in grouped_by_months]
 
