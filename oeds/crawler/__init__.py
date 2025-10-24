@@ -30,6 +30,7 @@ crawlers: dict[str, type[BaseCrawler]] = {
     "public": NutsCrawler,
     "chargepoint": ChargepointDownloader,
     "e2watch": E2WatchCrawler,
+    "ecmwf": EcmwfCrawler,
     "eon_grid_fees": EonGridFeeCrawler,
     "entsoe": EntsoeCrawler,
     "entsog": EntsogCrawler,
