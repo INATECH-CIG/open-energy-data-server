@@ -73,3 +73,6 @@ services:
       - ./data/provisioning/grafana/dashboardproviders:/etc/grafana/provisioning/dashboards
       - ./data/provisioning/grafana/dashboards:/var/lib/grafana/dashboards
     restart: always
+
+volumes:
+  db_data:
