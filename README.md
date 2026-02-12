@@ -22,7 +22,8 @@ For an interactive Documentation, please visit the [Read the Docs Page](https://
 ## Getting started
 
 To set up your institutes new open-data server, you can [install docker](https://docs.docker.com/engine/install/) or [podman](https://podman.io/).
-And start the `compose.yml` with `docker compose up -d`.
+Then do `cp .env_template .env` and `nano .env` to set credentials. 
+Start the `compose.yml` with `docker compose up -d`.
 
 Then you have a running TimescaleDB server listening on postgresql default port `5432`.
 
