@@ -2,7 +2,6 @@
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-version: "3"
 services:
   open-data-17:
     image: timescale/timescaledb-ha:pg17-oss
