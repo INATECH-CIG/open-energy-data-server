@@ -29,6 +29,8 @@ We also need to create the directory for postgres data storage and give postgres
 `sudo chown -R 1000:1000 ./data/open-data-ha`  
 `sudo chmod 700 ./data/open-data-ha`  
 
+Open the file `/data/init.sql` and replace `READONLY_PW` with your password that matches the `READONLY_PW` from for `.env`
+
 Start the `compose.yml` with `docker compose up -d`.
 
 Then you have a running TimescaleDB server listening on postgresql default port `5432`.
