@@ -19,7 +19,9 @@ from data_analysis import (
     perform_pooling_analysis,
     perform_post_processing_aggregation
 )
+from prefect import flow
 
+@flow
 def main():
     # ==========================================
     # CONTROL PANEL
