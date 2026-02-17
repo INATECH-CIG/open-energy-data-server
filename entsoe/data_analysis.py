@@ -17,17 +17,6 @@ from functools import wraps
 _original_to_csv = pd.DataFrame.to_csv
 
 
-@wraps(_original_to_csv)
-def _to_csv_with_print(self, path_or_buf=None, *args, **kwargs):
-    result = _original_to_csv(self, path_or_buf, *args, **kwargs)
-    print('#############')
-    print(f"[pandas] CSV written to: {path_or_buf}")
-    return result
-
-
-# Monkey patch
-pd.DataFrame.to_csv = _to_csv_with_print
-
 def _load_if_missing(config, gen_dfs, comm_dfs=None, phys_dfs=None):
     """
     Loads Generation, Commercial Flow, and Physical Flow data from disk if not passed in memory.

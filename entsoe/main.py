@@ -29,9 +29,9 @@ def main():
     
     # 1. Execution Flags (True = Run this step)
     my_run_flags = {
-        "download": False,
+        "download": True,
         "process": False,
-        "analysis": True,
+        "analysis": False,
     }
     
     # 2. Define Period (UTC)
@@ -54,6 +54,7 @@ def main():
     config = PipelineConfig(
         date_range=period,
         run_flags=my_run_flags,
+        debug_mode=False
         # Uncomment below to apply subsets:
         # target_zones=selected_bzs,
         # data_types=selected_data_types

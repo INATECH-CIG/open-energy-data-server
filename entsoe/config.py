@@ -11,7 +11,8 @@ class PipelineConfig:
         key_file: str = "keys.yaml", 
         run_flags: Optional[Dict[str, bool]] = None,
         target_zones: Optional[List[str]] = None,
-        data_types: Optional[Dict[str, bool]] = None
+        data_types: Optional[Dict[str, bool]] = None,
+        debug_mode: bool = False,
     ):
         # --- PATHS ---
         self.base_dir = Path(__file__).parent
@@ -30,6 +31,8 @@ class PipelineConfig:
             "analysis": True
         }
         if run_flags: self.run_phases.update(run_flags)
+
+        self.debug_mode = debug_mode
 
         # --- DATA FILTERS ---
         self.data_types = {
@@ -53,6 +56,9 @@ class PipelineConfig:
             print(f"Configured for subset of zones: {self.target_zones}")
         else:
             self.target_zones = self.all_zones
+
+        if self.debug_mode:
+                self.target_zones = self.target_zones[:3]
 
         # --- API KEY ---
         with open(self.base_dir / key_file, "r") as f:
