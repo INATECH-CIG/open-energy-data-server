@@ -148,7 +148,9 @@ services:
     command: prefect server services start
 
   prefect-worker:
-    image: prefecthq/prefect:3-latest
+    build:
+      context: .
+      dockerfile: Dockerfile.prefect-worker
     container_name: prefect-worker
     depends_on:
       prefect-server:
