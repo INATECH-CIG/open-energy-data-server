@@ -5,6 +5,7 @@ from typing import Dict
 from entsoe import EntsoePandasClient
 from config import PipelineConfig
 from utils import safe_query, fill_gaps_wrapper, correct_zero_values
+from postgres_utils import df_to_timescale
 
 # --- GB SPECIAL CONSTANTS ---
 TIMEOUT = 60
@@ -40,8 +41,13 @@ def download_generation_demand(client: EntsoePandasClient, config: PipelineConfi
             gen_df = safe_query(client.query_generation, context=f"Generation {bz}", country_code=bz, start=config.start, end=config.end, nett=True)
             load_df = safe_query(client.query_load, context=f"Load {bz}", country_code=bz, start=config.start, end=config.end)
 
-        if gen_df is not None: gen_df.to_csv(raw_dir / f"{bz}_raw_generation.csv")
-        if load_df is not None: load_df.to_csv(raw_dir / f"{bz}_raw_load.csv")
+        if gen_df is not None:
+            gen_df.to_csv(raw_dir / f"{bz}_raw_generation.csv")
+            df_to_timescale(gen_df, f"{bz}_raw_generation")
+        if load_df is not None:
+            load_df.to_csv(raw_dir / f"{bz}_raw_load.csv")
+            df_to_timescale(gen_df, f"{bz}_raw_load")
+
 
 def process_generation_demand(config: PipelineConfig) -> Dict[str, pd.DataFrame]:
     """Cleans/Resamples data. Iterates over ALL ZONES to build full dataset."""
