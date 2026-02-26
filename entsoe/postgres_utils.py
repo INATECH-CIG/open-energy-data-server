@@ -4,20 +4,32 @@ from dotenv import load_dotenv
 from pathlib import Path
 import pandas as pd
 import psycopg2
+import time
 
 env_path = Path(__file__).parent.parent / ".env"
 load_dotenv(dotenv_path=env_path)
 
-def get_connection():
-    conn_params = {
-        "dbname": os.getenv("DB_NAME"),
-        "user": os.getenv("DB_USER"),
-        "password": os.getenv("DB_PASSWORD"),
-        "host": "open-data-17",
-        "port":  "5432"
-    }
-    conn = psycopg2.connect(**conn_params)
-    return conn
+def get_flow_table_name(bz: str, flow_type: str, dayahead: bool, raw: bool):
+    """returns the timescale table name for a given bidding zone. flowtype and dayahead flag"""
+    return f"{bz}{"_raw" if raw else ""}_{flow_type}_flows{"_dayahead" if dayahead else ""}"
+
+def get_connection(retries: int = 5):
+    try:
+        conn_params = {
+            "dbname": os.getenv("DB_NAME"),
+            "user": os.getenv("DB_USER"),
+            "password": os.getenv("DB_PASSWORD"),
+            "host": "open-data-17",
+            "port":  "5432"
+        }
+        conn = psycopg2.connect(**conn_params)
+        return conn
+    except psycopg2.OperationalError as e:
+        print('psycopg2.OperationalError: Retry connection to DB')
+        print(str(e))
+        time.sleep(3)
+        if retries > 0:
+            return get_connection(retries - 1)
 
 def ensure_table(tablename, df):
     conn = get_connection()

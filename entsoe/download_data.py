@@ -5,7 +5,7 @@ from typing import Dict
 from entsoe import EntsoePandasClient
 from config import PipelineConfig
 from utils import safe_query, fill_gaps_wrapper, correct_zero_values
-from postgres_utils import df_to_timescale
+from postgres_utils import df_to_timescale, get_flow_table_name
 
 # --- GB SPECIAL CONSTANTS ---
 TIMEOUT = 60
@@ -106,6 +106,7 @@ def process_generation_demand(config: PipelineConfig) -> Dict[str, pd.DataFrame]
             gen_df = correct_zero_values(gen_df, gaps_dir, bz, config)
             
             gen_df.to_csv(out_dir / f"{bz}_generation_demand_data_bidding_zones.csv")
+            df_to_timescale(gen_df, f"{bz}_generation_demand_data_bidding_zones")
             gen_storage_dict[bz] = gen_df
 
     return gen_storage_dict
@@ -135,6 +136,8 @@ def download_flows(client: EntsoePandasClient, config: PipelineConfig, flow_type
     for bz in config.target_zones:
         print(f"[Download] {flow_type} flows for {bz} (Dayahead={dayahead})...")
         flow_df = None
+
+        timescalae_table_name = get_flow_table_name(bz, flow_type, dayahead, raw = True)
         
         # Iterate over neighbors
         for n in [z for z in config.neighbours_map[bz] if z in config.zones]:
@@ -162,6 +165,7 @@ def download_flows(client: EntsoePandasClient, config: PipelineConfig, flow_type
         if flow_df is not None: 
             flow_df = flow_df.loc[~flow_df.index.duplicated(keep='first')]
             flow_df.to_csv(raw_dir / f"{bz}_raw_flows.csv")
+            df_to_timescale(flow_df, timescale_table_name)
 
 def process_flows(config: PipelineConfig, flow_type: str = "commercial", dayahead: bool = False) -> Dict[str, pd.DataFrame]:
     """Processes flows for ALL ZONES."""
@@ -178,6 +182,8 @@ def process_flows(config: PipelineConfig, flow_type: str = "commercial", dayahea
     for bz in config.zones:
         raw_path = raw_dir / f"{bz}_raw_flows.csv"
         if not raw_path.exists(): continue
+
+        timescale_table_name = get_flow_table_name(bz, flow_type, dayahead, raw = False)
 
         print(f"[Process] {flow_type} flows for {bz}...")
         df = pd.read_csv(raw_path, index_col=0)
@@ -202,6 +208,7 @@ def process_flows(config: PipelineConfig, flow_type: str = "commercial", dayahea
         
         filename = f"{bz}_commercial_flows_{'dayahead' if dayahead else 'total'}_bidding_zones.csv" if flow_type == "commercial" else f"{bz}_physical_flow_data_bidding_zones.csv"
         final_df.to_csv(out_dir / filename)
+        df_to_timescale(final_df, timescale_table_name)
         flow_dict[bz] = final_df
 
     return flow_dict

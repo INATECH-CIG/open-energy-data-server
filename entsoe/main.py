@@ -35,7 +35,7 @@ def main():
     }
     
     # 2. Define Period (UTC)
-    period = ("2025-01-01 00:00", "2025-01-01 10:30")
+    period = ("2025-01-01 00:00", "2025-01-01 11:59")
 
     # 3. Optional: Download only Subsets of Data (Uncomment to use)
     # -------------------------------------------------------
@@ -86,7 +86,6 @@ def main():
         
         # A. Generation & Demand (Clean, Resample, Patch Gaps)
         gen_data = process_generation_demand(config) #outputs/generation_demand_data_bidding_zones/2025
-        
         # B. Commercial Flows (Total) -> Balance & Keep
         raw_comm = process_flows(config, "commercial", dayahead=False) # outputs/comm_flow_total_bidding_zones/2025/
         final_comm = balance_flows_symmetry(raw_comm, config, "commercial", dayahead=False) # outputs/comm_flow_total_bidding_zones/2025/
@@ -107,14 +106,14 @@ def main():
         perform_decomposition_analysis(config, gen_dfs=gen_data, comm_dfs=final_comm) # outputs/comm_flow_total_bidding_zones/2025/results/
         
         # 2. Flow Tracing (Matrix Inversion)
-        perform_aggregated_flow_tracing(config, gen_dfs=gen_data, phys_flow_dfs=final_phys)
-        #perform_direct_flow_tracing(config, gen_dfs=gen_data, phys_flow_dfs=final_phys)
+        perform_aggregated_flow_tracing(config, gen_dfs=gen_data, phys_flow_dfs=final_phys) #outputs/import_flow_tracing_bidding_zones/agg_coupling
+        perform_direct_flow_tracing(config, gen_dfs=gen_data, phys_flow_dfs=final_phys) #outputs/import_flow_tracing_bidding_zones/direct_coupling
         
         # 3. Pooling (European Mix)
-        #perform_pooling_analysis(config, gen_dfs=gen_data, comm_dfs=final_comm, phys_flow_dfs=final_phys)
+        perform_pooling_analysis(config, gen_dfs=gen_data, comm_dfs=final_comm, phys_flow_dfs=final_phys) #outputs/pooling
         
         # 4. Aggregation (Annual Totals)
-        #perform_post_processing_aggregation(config)
+        perform_post_processing_aggregation(config) #outputs/annual_totals_per_method
 
 if __name__ == "__main__":
     main()
