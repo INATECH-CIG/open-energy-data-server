@@ -73,7 +73,7 @@ The used database technology for the database server is [TimescaleDB](https://ti
 This project uses [prefect](https://docs.prefect.io/v3/get-started) for orchestrating all the workflows. 
 Prefect can automatically run python scripts e.g. for crawling, processing and analysing data. 
 To add a script, you have to deploy it. See [here](https://docs.prefect.io/v3/how-to-guides/deployments/create-deployments) for more information about deploying. 
-An overview is shown [here](http://88.214.56.50:4200/runs).
+An overview dashboard of your flows and runs is shown at http://<ip>:4200/runs).
 
 ### What is a time-series database?
 Normal SQL tables can get quite slow if millions of entries are stored in them.
