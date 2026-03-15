@@ -43,10 +43,10 @@ def download_generation_demand(client: EntsoePandasClient, config: PipelineConfi
 
         if gen_df is not None:
             gen_df.to_csv(raw_dir / f"{bz}_raw_generation.csv")
-            df_to_timescale(gen_df, f"{bz}_raw_generation")
+            df_to_timescale(gen_df, f"{bz}_raw_generation", config.db_schema_name)
         if load_df is not None:
             load_df.to_csv(raw_dir / f"{bz}_raw_load.csv")
-            df_to_timescale(gen_df, f"{bz}_raw_load")
+            df_to_timescale(gen_df, f"{bz}_raw_load", config.db_schema_name)
 
 
 def process_generation_demand(config: PipelineConfig) -> Dict[str, pd.DataFrame]:
@@ -106,7 +106,7 @@ def process_generation_demand(config: PipelineConfig) -> Dict[str, pd.DataFrame]
             gen_df = correct_zero_values(gen_df, gaps_dir, bz, config)
             
             gen_df.to_csv(out_dir / f"{bz}_generation_demand_data_bidding_zones.csv")
-            df_to_timescale(gen_df, f"{bz}_generation_demand_data_bidding_zones")
+            df_to_timescale(gen_df, f"{bz}_generation_demand_data_bidding_zones", config.db_schema_name)
             gen_storage_dict[bz] = gen_df
 
     return gen_storage_dict
@@ -165,7 +165,7 @@ def download_flows(client: EntsoePandasClient, config: PipelineConfig, flow_type
         if flow_df is not None: 
             flow_df = flow_df.loc[~flow_df.index.duplicated(keep='first')]
             flow_df.to_csv(raw_dir / f"{bz}_raw_flows.csv")
-            df_to_timescale(flow_df, timescale_table_name)
+            df_to_timescale(flow_df, timescale_table_name, config.db_schema_name)
 
 def process_flows(config: PipelineConfig, flow_type: str = "commercial", dayahead: bool = False) -> Dict[str, pd.DataFrame]:
     """Processes flows for ALL ZONES."""
@@ -208,7 +208,7 @@ def process_flows(config: PipelineConfig, flow_type: str = "commercial", dayahea
         
         filename = f"{bz}_commercial_flows_{'dayahead' if dayahead else 'total'}_bidding_zones.csv" if flow_type == "commercial" else f"{bz}_physical_flow_data_bidding_zones.csv"
         final_df.to_csv(out_dir / filename)
-        df_to_timescale(final_df, timescale_table_name)
+        df_to_timescale(final_df, timescale_table_name, config.db_schema_name)
         flow_dict[bz] = final_df
 
     return flow_dict

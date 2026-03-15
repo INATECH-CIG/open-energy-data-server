@@ -113,12 +113,12 @@ def perform_decomposition_analysis(config: PipelineConfig, gen_dfs=None, comm_df
         if not raw_total_imports.empty:
             path_total = dirs["per_bidding_zone"] / f"{bz}_import_comm_flow_total_per_bidding_zone.csv"
             raw_total_imports.to_csv(path_total)
-            df_to_timescale(raw_total_imports, f"{bz}_import_comm_flow_total_per_bidding_zone")
+            df_to_timescale(raw_total_imports, f"{bz}_import_comm_flow_total_per_bidding_zone", config.db_schema_name)
             
         if not raw_netted_imports.empty:
             path_netted = dirs["netted_per_bidding_zone"] / f"{bz}_import_comm_flow_total_netted_per_bidding_zone.csv"
             raw_netted_imports.to_csv(path_netted)
-            df_to_timescale(raw_netted_imports, f"{bz}_import_comm_flow_total_netted_per_bidding_zone")
+            df_to_timescale(raw_netted_imports, f"{bz}_import_comm_flow_total_netted_per_bidding_zone", config.db_schema_name)
             
     print("[Decomposition] Raw totals saved. Proceeding to fuel type analysis...")
 
@@ -174,8 +174,8 @@ def perform_decomposition_analysis(config: PipelineConfig, gen_dfs=None, comm_df
             # Save Raw Decomposed Data
             total_full.to_csv(dirs["per_type_per_bidding_zone"] / f"{bz}_import_comm_flow_total_per_type_per_bidding_zone.csv")
             netted_full.to_csv(dirs["netted_per_type_per_bidding_zone"] / f"{bz}_import_comm_flow_total_netted_per_type_per_bidding_zone.csv")
-            df_to_timescale(total_full, f"{bz}_import_comm_flow_total_per_type_per_bidding_zone")
-            df_to_timescale(netted_full, f"{bz}_import_comm_flow_total_netted_per_type_per_bidding_zone")
+            df_to_timescale(total_full, f"{bz}_import_comm_flow_total_per_type_per_bidding_zone", config.db_schema_name)
+            df_to_timescale(netted_full, f"{bz}_import_comm_flow_total_netted_per_type_per_bidding_zone", config.db_schema_name)
 
             # D. Aggregate by Fuel Type (e.g., all Wind entering DE)
             per_type = pd.DataFrame(index=config.time_index)
@@ -190,8 +190,8 @@ def perform_decomposition_analysis(config: PipelineConfig, gen_dfs=None, comm_df
 
             per_type.to_csv(dirs["per_type"] / f"{bz}_import_comm_flow_total_per_type.csv")
             per_type_net.to_csv(dirs["netted_per_type"] / f"{bz}_import_comm_flow_total_netted_per_type.csv")
-            df_to_timescale(per_type, f"{bz}_import_comm_flow_total_per_type")
-            df_to_timescale(per_type_net, f"{bz}_import_comm_flow_total_netted_per_type")
+            df_to_timescale(per_type, f"{bz}_import_comm_flow_total_per_type", config.db_schema_name)
+            df_to_timescale(per_type_net, f"{bz}_import_comm_flow_total_netted_per_type", config.db_schema_name)
 
             # E. Aggregate by Category (Renewable/Fossil)
             per_agg = pd.DataFrame(index=config.time_index)
@@ -204,8 +204,8 @@ def perform_decomposition_analysis(config: PipelineConfig, gen_dfs=None, comm_df
             
             per_agg.to_csv(dirs["per_agg_type"] / f"{bz}_import_comm_flow_total_per_agg_type.csv")
             per_agg_net.to_csv(dirs["netted_per_agg_type"] / f"{bz}_import_comm_flow_total_netted_per_agg_type.csv")
-            df_to_timescale(per_agg, f"{bz}_import_comm_flow_total_per_agg_type")
-            df_to_timescale(per_agg_net, f"{bz}_import_comm_flow_total_netted_per_agg_type")
+            df_to_timescale(per_agg, f"{bz}_import_comm_flow_total_per_agg_type", config.db_schema_name)
+            df_to_timescale(per_agg_net, f"{bz}_import_comm_flow_total_netted_per_agg_type", config.db_schema_name)
             
     print("[Decomposition] Analysis Complete.")
 
@@ -256,7 +256,7 @@ def _decompose_and_save(config, traced_dfs, base_dir, label, gen_dfs):
 
         # Save Volume coming from every other country (The "Flow Matrix" result)
         traced_dfs[bz].to_csv(per_bz_dir / f"{bz}_import_flow_tracing_{label}_per_bidding_zone.csv")
-        df_to_timescale(traced_dfs[bz], f"{bz}_import_flow_tracing_{label}_per_bidding_zone")
+        df_to_timescale(traced_dfs[bz], f"{bz}_import_flow_tracing_{label}_per_bidding_zone", config.db_schema_name)
 
         # Multiply Volume by Origin's Mix
         type_dfs = []
@@ -276,7 +276,7 @@ def _decompose_and_save(config, traced_dfs, base_dir, label, gen_dfs):
         if type_dfs:
             full_type = pd.concat(type_dfs, axis=1)
             full_type.to_csv(per_type_dir / f"{bz}_import_flow_tracing_{label}_per_type_per_bidding_zone.csv")
-            df_to_timescale(full_type, f"{bz}_import_flow_tracing_{label}_per_type_per_bidding_zone")
+            df_to_timescale(full_type, f"{bz}_import_flow_tracing_{label}_per_type_per_bidding_zone", config.db_schema_name)
             
             # Aggregate per Type
             per_type = pd.DataFrame(index=config.time_index)
@@ -285,7 +285,7 @@ def _decompose_and_save(config, traced_dfs, base_dir, label, gen_dfs):
                 cols_exact = [c for c in cols if c.split('_')[-1].strip() == tech]
                 if cols_exact: per_type[tech] = full_type[cols_exact].sum(axis=1)
             per_type.to_csv(per_type_total_dir / f"{bz}_import_flow_tracing_{label}_per_type.csv")
-            df_to_timescale(per_type, f"{bz}_import_flow_tracing_{label}_per_type")
+            df_to_timescale(per_type, f"{bz}_import_flow_tracing_{label}_per_type", config.db_schema_name)
 
             
             # Aggregate per Category
@@ -294,7 +294,7 @@ def _decompose_and_save(config, traced_dfs, base_dir, label, gen_dfs):
                 valid = [t for t in techs if t in per_type.columns]
                 if valid: per_agg[cat] = per_type[valid].sum(axis=1)
             per_agg.to_csv(per_agg_total_dir / f"{bz}_import_flow_tracing_{label}_per_agg_type.csv")
-            df_to_timescale(per_agg, f"{bz}_import_flow_tracing_{label}_per_agg_type")
+            df_to_timescale(per_agg, f"{bz}_import_flow_tracing_{label}_per_agg_type", config.db_schema_name)
 
             
     print(f"[{label.upper()}] Save Complete.")
@@ -511,7 +511,7 @@ def perform_pooling_analysis(config: PipelineConfig, gen_dfs=None, comm_dfs=None
 
             # A. Save Raw Import Volumes
             df_imp.to_csv(dirs["per_bidding_zone"] / f"{bz}_pooled_{file_p}_per_bidding_zone.csv")
-            df_to_timescale(df_imp, f"{bz}_pooled_{file_p}_per_bidding_zone")
+            df_to_timescale(df_imp, f"{bz}_pooled_{file_p}_per_bidding_zone", config.db_schema_name)
 
             # B. Apply Generation Fractions
             type_dfs = []
@@ -524,7 +524,7 @@ def perform_pooling_analysis(config: PipelineConfig, gen_dfs=None, comm_dfs=None
             if type_dfs:
                 full = pd.concat(type_dfs, axis=1)
                 full.to_csv(dirs["per_type_per_bidding_zone"] / f"{bz}_pooled_{file_p}_per_type_per_bidding_zone.csv")
-                df_to_timescale(full, f"{bz}_pooled_{file_p}_per_type_per_bidding_zone")
+                df_to_timescale(full, f"{bz}_pooled_{file_p}_per_type_per_bidding_zone", config.db_schema_name)
 
                 # C. Aggregate by Fuel Type
                 per_type = pd.DataFrame(index=config.time_index)
@@ -533,7 +533,7 @@ def perform_pooling_analysis(config: PipelineConfig, gen_dfs=None, comm_dfs=None
                     cols_exact = [c for c in cols if c.split('_')[-1].strip() == tech]
                     if cols_exact: per_type[tech] = full[cols_exact].sum(axis=1)
                 per_type.to_csv(dirs["per_type"] / f"{bz}_pooled_{file_p}_per_type.csv")
-                df_to_timescale(per_type, f"{bz}_pooled_{file_p}_per_type")
+                df_to_timescale(per_type, f"{bz}_pooled_{file_p}_per_type", config.db_schema_name)
 
                 # D. Aggregate by Category
                 per_agg = pd.DataFrame(index=config.time_index)
@@ -541,7 +541,7 @@ def perform_pooling_analysis(config: PipelineConfig, gen_dfs=None, comm_dfs=None
                     valid = [t for t in techs if t in per_type.columns]
                     if valid: per_agg[cat] = per_type[valid].sum(axis=1)
                 per_agg.to_csv(dirs["per_agg_type"] / f"{bz}_pooled_{file_p}_per_agg_type.csv")
-                df_to_timescale(per_agg,f"{bz}_pooled_{file_p}_per_agg_type")
+                df_to_timescale(per_agg,f"{bz}_pooled_{file_p}_per_agg_type", config.db_schema_name)
     # ---------------------------------------------------------
     # METHOD A: Commercial Link-Based Pooling
     # ---------------------------------------------------------
@@ -706,10 +706,10 @@ def perform_post_processing_aggregation(config: PipelineConfig):
         res_imp_type.T.to_csv(sub_outs["imp_type"] / f"{bz}_annual_totals_import_per_type_{year}.csv")
         res_exp_type.T.to_csv(sub_outs["exp_type"] / f"{bz}_annual_totals_export_per_type_{year}.csv")
 
-        df_to_timescale(res_imp_bz, f"{bz}_annual_totals_import_per_bidding_zone_{year}")
-        df_to_timescale(res_exp_bz, f"{bz}_annual_totals_export_per_bidding_zone_{year}")
-        df_to_timescale(res_imp_type, f"{bz}_annual_totals_import_per_type_{year}")
-        df_to_timescale(res_imp_type, f"{bz}_annual_totals_export_per_type_{year}")
+        df_to_timescale(res_imp_bz, f"{bz}_annual_totals_import_per_bidding_zone_{year}", config.db_schema_name)
+        df_to_timescale(res_exp_bz, f"{bz}_annual_totals_export_per_bidding_zone_{year}", config.db_schema_name)
+        df_to_timescale(res_imp_type, f"{bz}_annual_totals_import_per_type_{year}", config.db_schema_name)
+        df_to_timescale(res_imp_type, f"{bz}_annual_totals_export_per_type_{year}", config.db_schema_name)
 
         # Save Aggregated Types
         res_agg = pd.DataFrame(dtype=float)
@@ -718,6 +718,6 @@ def perform_post_processing_aggregation(config: PipelineConfig):
                 valid = [t for t in techs if t in res_imp_type.columns]
                 res_agg.loc[m, cat] = res_imp_type.loc[m, valid].sum()
         res_agg.T.to_csv(sub_outs["imp_agg"] / f"{bz}_annual_totals_import_per_agg_type_{year}.csv")
-        df_to_timescale(res_agg, f"{bz}_annual_totals_import_per_agg_type_{year}" )
+        df_to_timescale(res_agg, f"{bz}_annual_totals_import_per_agg_type_{year}", config.db_schema_name)
     
     print("Post-Processing Complete.")

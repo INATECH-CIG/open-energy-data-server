@@ -54,7 +54,8 @@ def main():
     config = PipelineConfig(
         date_range=period,
         run_flags=my_run_flags,
-        debug_mode=False
+        debug_mode=False,
+        db_schema_name= 'entsoe'
         # Uncomment below to apply subsets:
         # target_zones=selected_bzs,
         # data_types=selected_data_types

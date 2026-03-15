@@ -13,6 +13,7 @@ class PipelineConfig:
         target_zones: Optional[List[str]] = None,
         data_types: Optional[Dict[str, bool]] = None,
         debug_mode: bool = False,
+        db_schema_name = None
     ):
         # --- PATHS ---
         self.base_dir = Path(__file__).parent
@@ -33,6 +34,7 @@ class PipelineConfig:
         if run_flags: self.run_phases.update(run_flags)
 
         self.debug_mode = debug_mode
+        self.db_schema_name = db_schema_name
 
         # --- DATA FILTERS ---
         self.data_types = {
@@ -58,7 +60,7 @@ class PipelineConfig:
             self.target_zones = self.all_zones
 
         if self.debug_mode:
-                self.target_zones = self.target_zones[:3]
+            self.target_zones = self.target_zones[:3]
 
         # --- API KEY ---
         with open(self.base_dir / key_file, "r") as f:
