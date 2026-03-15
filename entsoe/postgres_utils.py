@@ -100,7 +100,7 @@ def ensure_table(tablename, schemaname, df):
     return
 
 
-def df_to_timescale(df, tablename, schema =  'public'):
+def df_to_timescale(df, tablename, schema_name ='public'):
     """
     Writes a dataframe into a timescale db table
     """
@@ -109,8 +109,8 @@ def df_to_timescale(df, tablename, schema =  'public'):
 
     df = df.reset_index().rename(columns={"index": "time"})
 
-    ensure_schema()
-    ensure_table(tablename, df)
+    ensure_schema(schema_name)
+    ensure_table(tablename, schema_name, df)
 
     buffer = StringIO()
     df.to_csv(buffer, index=False, header=False)
@@ -119,7 +119,7 @@ def df_to_timescale(df, tablename, schema =  'public'):
     cur.copy_expert(
         sql.SQL("COPY {}.{} FROM STDIN WITH (FORMAT CSV)")
         .format(
-            sql.Identifier(schema),
+            sql.Identifier(schema_name),
             sql.Identifier(tablename)
         ),
         buffer
