@@ -14,22 +14,24 @@ def get_flow_table_name(bz: str, flow_type: str, dayahead: bool, raw: bool):
     return f"{bz}{'_raw' if raw else ''}_{flow_type}_flows{'_dayahead' if dayahead else ''}"
 
 def get_connection(retries: int = 5):
-    try:
-        conn_params = {
-            "dbname": os.getenv("DB_NAME"),
-            "user": os.getenv("DB_USER"),
-            "password": os.getenv("DB_PASSWORD"),
-            "host": "open-data-17",
-            "port":  "5432"
-        }
-        conn = psycopg2.connect(**conn_params)
-        return conn
-    except psycopg2.OperationalError as e:
-        print('psycopg2.OperationalError: Retry connection to DB')
-        print(str(e))
-        time.sleep(3)
-        if retries > 0:
-            return get_connection(retries - 1)
+    conn_params = {
+        "dbname": os.getenv("DB_NAME"),
+        "user": os.getenv("DB_USER"),
+        "password": os.getenv("DB_PASSWORD"),
+        "host": "open-data-17",
+        "port": "5432"
+    }
+    for trial in range(retries):
+        try:
+            conn = psycopg2.connect(**conn_params)
+            return conn
+        except psycopg2.OperationalError as e:
+            print(f"Timescale Connection attempt {trial} failed: {e}")
+            if trial < retries:
+                print(f"Retrying in 3 seconds")
+                time.sleep(3)
+            else:
+                raise Exception(f"Could not connect to the database after {retries} attempts.") from e
 
 def ensure_table(tablename, df):
     conn = get_connection()
