@@ -137,7 +137,7 @@ def download_flows(client: EntsoePandasClient, config: PipelineConfig, flow_type
         print(f"[Download] {flow_type} flows for {bz} (Dayahead={dayahead})...")
         flow_df = None
 
-        timescalae_table_name = get_flow_table_name(bz, flow_type, dayahead, raw = True)
+        timescale_table_name = get_flow_table_name(bz, flow_type, dayahead, raw = True)
         
         # Iterate over neighbors
         for n in [z for z in config.neighbours_map[bz] if z in config.zones]:

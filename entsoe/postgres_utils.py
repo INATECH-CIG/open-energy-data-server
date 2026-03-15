@@ -11,7 +11,7 @@ load_dotenv(dotenv_path=env_path)
 
 def get_flow_table_name(bz: str, flow_type: str, dayahead: bool, raw: bool):
     """returns the timescale table name for a given bidding zone. flowtype and dayahead flag"""
-    return f"{bz}{"_raw" if raw else ""}_{flow_type}_flows{"_dayahead" if dayahead else ""}"
+    return f"{bz}{'_raw' if raw else ''}_{flow_type}_flows{'_dayahead' if dayahead else ''}"
 
 def get_connection(retries: int = 5):
     try:
