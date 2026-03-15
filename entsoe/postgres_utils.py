@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 from pathlib import Path
 import pandas as pd
 import psycopg2
+from psycopg2 import sql
 import time
 
 env_path = Path(__file__).parent.parent / ".env"
@@ -33,16 +34,38 @@ def get_connection(retries: int = 5):
             else:
                 raise Exception(f"Could not connect to the database after {retries} attempts.") from e
 
-def ensure_table(tablename, df):
+def ensure_schema(schemaname):
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+                SELECT EXISTS (SELECT 1
+                               FROM information_schema.schemata
+                               WHERE schema_name = %s)
+                """, (schemaname,))
+    exists = cur.fetchone()[0]
+
+    if not exists:
+        cur.execute(
+            sql.SQL("CREATE SCHEMA IF NOT EXISTS {}")
+            .format(sql.Identifier(schemaname))
+        )
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+def ensure_table(tablename, schemaname, df):
     conn = get_connection()
     cur = conn.cursor()
 
     cur.execute("""
         SELECT EXISTS (
-            SELECT FROM information_schema.tables 
-            WHERE table_name = %s
+            SELECT 1
+            FROM information_schema.tables
+            WHERE table_schema = %s AND table_name = %s
         )
-    """, (tablename.lower(),))
+    """, (schemaname.lower(), tablename.lower()))
     exists = cur.fetchone()[0]
 
     if not exists:
@@ -58,19 +81,26 @@ def ensure_table(tablename, df):
                 sql_type = "TEXT"
             col_defs.append(f'"{col}" {sql_type}')
 
-        create_sql = f"CREATE TABLE {tablename}({', '.join(col_defs)});"
+        create_sql = sql.SQL("CREATE TABLE {}.{}({})").format(
+            sql.Identifier(schemaname),
+            sql.Identifier(tablename),
+            sql.SQL(', ').join(sql.SQL(col_def) for col_def in col_defs)
+        )
         cur.execute(create_sql)
 
-        hypertable_sql = f"SELECT create_hypertable('{tablename}', 'time', if_not_exists => TRUE);"
+        hypertable_sql = sql.SQL("SELECT create_hypertable({}.{}, 'time', if_not_exists => TRUE);").format(
+            sql.Identifier(schemaname),
+            sql.Identifier(tablename)
+        )
         cur.execute(hypertable_sql)
         conn.commit()
 
     cur.close()
     conn.close()
-    return tablename
+    return
 
 
-def df_to_timescale(df, tablename):
+def df_to_timescale(df, tablename, schema =  'public'):
     """
     Writes a dataframe into a timescale db table
     """
@@ -79,6 +109,7 @@ def df_to_timescale(df, tablename):
 
     df = df.reset_index().rename(columns={"index": "time"})
 
+    ensure_schema()
     ensure_table(tablename, df)
 
     buffer = StringIO()
@@ -86,7 +117,11 @@ def df_to_timescale(df, tablename):
     buffer.seek(0)
 
     cur.copy_expert(
-        f"COPY {tablename} FROM STDIN WITH (FORMAT CSV)",
+        sql.SQL("COPY {}.{} FROM STDIN WITH (FORMAT CSV)")
+        .format(
+            sql.Identifier(schema),
+            sql.Identifier(tablename)
+        ),
         buffer
     )
 
