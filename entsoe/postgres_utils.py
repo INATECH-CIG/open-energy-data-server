@@ -34,13 +34,29 @@ def get_connection(retries: int = 5):
             else:
                 raise Exception(f"Could not connect to the database after {retries} attempts.") from e
 
-def ensure_schema(schemaname, cur, conn):
+def ensure_schema(schemaname, readonly_user,  cur, conn):
 
     cur.execute(
         sql.SQL("CREATE SCHEMA IF NOT EXISTS {}")
         .format(sql.Identifier(schemaname))
     )
     conn.commit()
+
+    cur.execute(
+        sql.SQL("GRANT USAGE ON SCHEMA {} TO {}")
+        .format(
+            sql.Identifier(schemaname),
+            sql.Identifier(readonly_user)
+        )
+    )
+
+    cur.execute(
+        sql.SQL("ALTER DEFAULT PRIVILEGES IN SCHEMA {} GRANT SELECT ON TABLES TO {}")
+        .format(
+            sql.Identifier(schemaname),
+            sql.Identifier(readonly_user)
+        )
+    )
 
 
 def ensure_table(tablename, schemaname, df, cur,conn):
@@ -83,7 +99,7 @@ def df_to_timescale(df, tablename, schema_name ='public'):
 
     df = df.reset_index().rename(columns={"index": "time"})
 
-    ensure_schema(schema_name,cur, conn)
+    ensure_schema(schema_name, 'readonly', cur, conn)
     ensure_table(tablename, schema_name, df, cur, conn)
 
     buffer = StringIO()
