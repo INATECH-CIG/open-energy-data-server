@@ -34,71 +34,45 @@ def get_connection(retries: int = 5):
             else:
                 raise Exception(f"Could not connect to the database after {retries} attempts.") from e
 
-def ensure_schema(schemaname):
-    conn = get_connection()
-    cur = conn.cursor()
+def ensure_schema(schemaname, cur, conn):
 
-    cur.execute("""
-                SELECT EXISTS (SELECT 1
-                               FROM information_schema.schemata
-                               WHERE schema_name = %s)
-                """, (schemaname,))
-    exists = cur.fetchone()[0]
-
-    if not exists:
-        cur.execute(
-            sql.SQL("CREATE SCHEMA IF NOT EXISTS {}")
-            .format(sql.Identifier(schemaname))
-        )
-
+    cur.execute(
+        sql.SQL("CREATE SCHEMA IF NOT EXISTS {}")
+        .format(sql.Identifier(schemaname))
+    )
     conn.commit()
-    cur.close()
-    conn.close()
 
-def ensure_table(tablename, schemaname, df):
-    conn = get_connection()
-    cur = conn.cursor()
 
-    cur.execute("""
-        SELECT EXISTS (
-            SELECT 1
-            FROM information_schema.tables
-            WHERE table_schema = %s AND table_name = %s
-        )
-    """, (schemaname.lower(), tablename.lower()))
-    exists = cur.fetchone()[0]
+def ensure_table(tablename, schemaname, df, cur,conn):
 
-    if not exists:
-        col_defs = []
-        for col, dtype in zip(df.columns, df.dtypes):
-            if pd.api.types.is_integer_dtype(dtype):
-                sql_type = "BIGINT"
-            elif pd.api.types.is_float_dtype(dtype):
-                sql_type = "DOUBLE PRECISION"
-            elif pd.api.types.is_datetime64_any_dtype(dtype):
-                sql_type = "TIMESTAMPTZ"
-            else:
-                sql_type = "TEXT"
-            col_defs.append(f'"{col}" {sql_type}')
+    col_defs = []
+    for col, dtype in zip(df.columns, df.dtypes):
+        if pd.api.types.is_integer_dtype(dtype):
+            sql_type = "BIGINT"
+        elif pd.api.types.is_float_dtype(dtype):
+            sql_type = "DOUBLE PRECISION"
+        elif pd.api.types.is_datetime64_any_dtype(dtype):
+            sql_type = "TIMESTAMPTZ"
+        else:
+            sql_type = "TEXT"
+        col_defs.append(f'"{col}" {sql_type}')
 
-        create_sql = sql.SQL("CREATE TABLE {}.{}({})").format(
-            sql.Identifier(schemaname),
-            sql.Identifier(tablename),
-            sql.SQL(', ').join(sql.SQL(col_def) for col_def in col_defs)
-        )
-        cur.execute(create_sql)
+    create_sql = sql.SQL(
+        "CREATE TABLE IF NOT EXISTS {}.{}({})"
+    ).format(
+        sql.Identifier(schemaname),
+        sql.Identifier(tablename),
+        sql.SQL(', ').join(sql.SQL(col_def) for col_def in col_defs)
+    )
+    sql.SQL(', ').join(sql.SQL(col_def) for col_def in col_defs)
 
-        hypertable_sql = sql.SQL("SELECT create_hypertable({}.{}, 'time', if_not_exists => TRUE);").format(
-            sql.Identifier(schemaname),
-            sql.Identifier(tablename)
-        )
-        cur.execute(hypertable_sql)
-        conn.commit()
+    cur.execute(create_sql)
+    conn.commit()
 
-    cur.close()
-    conn.close()
-    return
-
+    full_table = f'{schemaname}."{tablename}"'
+    hypertable_sql = "SELECT create_hypertable(%s, 'time', if_not_exists => TRUE);"
+    cur.execute(hypertable_sql, (full_table,))
+    conn.commit()
 
 def df_to_timescale(df, tablename, schema_name ='public'):
     """
@@ -109,8 +83,8 @@ def df_to_timescale(df, tablename, schema_name ='public'):
 
     df = df.reset_index().rename(columns={"index": "time"})
 
-    ensure_schema(schema_name)
-    ensure_table(tablename, schema_name, df)
+    ensure_schema(schema_name,cur, conn)
+    ensure_table(tablename, schema_name, df, cur, conn)
 
     buffer = StringIO()
     df.to_csv(buffer, index=False, header=False)
