@@ -10,8 +10,8 @@ from postgres_utils import df_to_timescale, get_flow_table_name
 # --- GB SPECIAL CONSTANTS ---
 TIMEOUT = 60
 GB_GENERATION_TYPES = [
-    "Biomass", "Fossil Hard coal", "Fossil Gas", "Fossil Oil", 
-    "Hydro Pumped Storage", "Hydro Run-of-river and poundage", 
+    "Biomass", "Fossil Gas", "Fossil Hard coal", "Fossil Oil",
+    "Hydro Pumped Storage", "Hydro Run-of-river and poundage",
     "Nuclear", "Other", "Solar", "Wind Offshore", "Wind Onshore"
 ]
 
@@ -74,16 +74,31 @@ def process_generation_demand(config: PipelineConfig) -> Dict[str, pd.DataFrame]
             # Now passes directory and prefix directly
             gen_df = fill_gaps_wrapper(gen_df, gaps_dir, f"{bz}_gen")
 
-            # Separate Storage
-            if "Hydro Pumped Storage" in gen_df.columns:
-                storage = gen_df["Hydro Pumped Storage"]
-                gen_df = gen_df.drop(columns=["Hydro Pumped Storage"])
-                gen_df["Generation"] = gen_df.sum(axis=1)
-                gen_df["Storage Discharge"] = storage.clip(lower=0.0)
-                gen_df["Storage Charge"] = storage.clip(upper=0.0).abs()
+            # --- STORAGE EXTRACTION & AGGREGATION ---
+            storage_cols = ["Hydro Pumped Storage", "Energy storage"]
+            existing_storage = [c for c in storage_cols if c in gen_df.columns]
+
+            if existing_storage:
+                # Sum the storage columns (fillna handles NaNs during addition)
+                storage_series = gen_df[existing_storage].fillna(0).sum(axis=1)
+                # Drop them so they aren't part of the regular generation clip/sum
+                gen_df = gen_df.drop(columns=existing_storage)
             else:
-                gen_df["Generation"] = gen_df.sum(axis=1)
-                gen_df["Storage Discharge"] = 0.0; gen_df["Storage Charge"] = 0.0
+                storage_series = None
+
+            # --- NEGATIVE CLIPPING ---
+            # Clip all remaining regular generation columns to 0 (removes negative station load)
+            gen_df = gen_df.clip(lower=0.0)
+
+            # --- TOTALS ---
+            gen_df["Generation"] = gen_df.sum(axis=1)
+
+            if storage_series is not None:
+                gen_df["Storage Discharge"] = storage_series.clip(lower=0.0)
+                gen_df["Storage Charge"] = storage_series.clip(upper=0.0).abs()
+            else:
+                gen_df["Storage Discharge"] = 0.0
+                gen_df["Storage Charge"] = 0.0
 
         if load_df is not None:
             load_df.index = pd.to_datetime(load_df.index, utc=True)
@@ -367,12 +382,29 @@ def _download_GB_demand_data(date):
 def fetch_simple_metrics(client, config):
     """Fetches Prices and Net Positions for Target Zones."""
     if not config.data_types["metrics"]: return
-    for name, method, kwargs in [("net_positions_dayahead", client.query_net_position, {"dayahead":True}), ("market_price_dayahead", client.query_day_ahead_prices, {})]:
+    for name, method, kwargs in [
+        ("net_positions_dayahead", client.query_net_position, {"dayahead": True}),
+        ("market_price_dayahead", client.query_day_ahead_prices, {})
+    ]:
         out_dir = config.get_output_path(name)
+
         for bz in config.target_zones:
             print(f"Fetching {name} for {bz}...")
             df = safe_query(method, context=f"{name} {bz}", country_code=bz, start=config.start, end=config.end, **kwargs)
             if df is not None:
-                if isinstance(df, pd.Series): df = df.to_frame(name="Value")
+                if isinstance(df, pd.Series):
+                    df = df.to_frame(name="Value")
+
+                # --- APPLY SIGN CORRECTION PATCH ---
+                # Only apply to Net Positions, only for Italian zones, and only for the year 2025
+                if name == "net_positions_dayahead" and bz.startswith("IT"):
+                    # Check if the data falls in 2025 (using the index to be absolutely safe)
+                    mask_2025 = df.index.year == 2025
+                    if mask_2025.any():
+                        print(
+                            f"  -> [PATCH] Inverting signs for {bz} 2025 Net Positions due to ENTSO-E reporting error.")
+                        df.loc[mask_2025] = df.loc[mask_2025] * -1
+                # -----------------------------------
+
                 df.index = pd.to_datetime(df.index, utc=True)
                 df.resample("1h").mean().to_csv(out_dir / f"{bz}_{name}.csv")

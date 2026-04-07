@@ -2,7 +2,7 @@ import yaml
 import pandas as pd
 from pathlib import Path
 from typing import Dict, Optional, Tuple, List
-from entsoe import mappings
+from mappings_alt import NEIGHBOURS
 
 class PipelineConfig:
     def __init__(
@@ -48,8 +48,8 @@ class PipelineConfig:
 
         # --- ZONE CONFIGURATION ---
         # Master list of all zones for analysis
-        self.all_zones = list(mappings.NEIGHBOURS.copy().keys())
-        self.neighbours_map = mappings.NEIGHBOURS.copy()
+        self.all_zones = list(NEIGHBOURS.copy().keys())
+        self.neighbours_map = NEIGHBOURS.copy()
         self._filter_zones()
 
         # Subset list for downloading specific regions
