@@ -275,7 +275,7 @@ def patch_gaps_with_dayahead(flow_df, gap_dict, bz, neighbour, config, min_gap_l
         return flow_df  # No long gaps, nothing to do
 
     # 2. Load Day-Ahead Data (Only if needed)
-    dayahead_path = config.get_output_path("comm_flow_dayahead_bidding_zones") / f"{bz}_commercial_flows_dayahead_bidding_zones.csv"
+    dayahead_path = config.get_output_path("comm_flow_dayahead_bidding_zones") / f"{bz}_comm_flow_dayahead_bidding_zones.csv"
     
     if not dayahead_path.exists():
         print(f"   [Warning] Long gap detected for {bz}<->{neighbour}, but no Day-Ahead file found to patch it.")

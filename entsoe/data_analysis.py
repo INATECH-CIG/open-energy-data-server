@@ -40,7 +40,7 @@ def _load_if_missing(config, gen_dfs, comm_dfs=None, phys_dfs=None):
         comm_dir = config.get_output_path("comm_flow_total_bidding_zones")
         comm_dfs = {}
         for bz in config.zones:
-            p = comm_dir / f"{bz}_commercial_flows_total_bidding_zones.csv"
+            p = comm_dir / f"{bz}_comm_flow_total_bidding_zones.csv"
             if p.exists():
                 df = pd.read_csv(p, index_col=0)
                 df.index = pd.to_datetime(df.index, utc=True)
