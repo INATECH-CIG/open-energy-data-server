@@ -41,21 +41,20 @@ def download_generation_demand(client: EntsoePandasClient, config: PipelineConfi
     Routes GB queries to the BMRS API and all others to the ENTSO-E client.
     """
     if not config.data_types["generation"]: return
-
     raw_dir = config.get_output_path("generation_demand_data_bidding_zones") / "raw"
-    raw_dir.mkdir(parents=True, exist_ok=True)
-
+    
     for bz in config.target_zones:
-        print(f"[Download] Gen/Demand for {bz}...")
-        gen_df, load_df = None, None
+        logger.info(f"[Download] Gen/Demand for {bz}...")
+        gen_df: Optional[pd.DataFrame] = None
+        load_df: Optional[pd.DataFrame] = None
 
         if bz == "GB":
             try:
-                print("   -> Using BMRS API for GB...")
+                logger.info(f"  -> Using BMRS API for GB")
                 gen_df = download_GB_per_type_data(config.start, config.end)
                 load_df = download_GB_demand_data(config.start, config.end)
-            except Exception as e:
-                print(f"[Error] Failed to download GB data: {e}")
+            except Exception as e: 
+                logger.error(f"[Error] Failed to download GB data: {e}", exc_info=config.debug_mode)
         else:
             gen_df = safe_query(client.query_generation, context=f"Generation {bz}", country_code=bz, start=config.start, end=config.end, nett=True)
             load_df = safe_query(client.query_load, context=f"Load {bz}", country_code=bz, start=config.start, end=config.end)
@@ -67,81 +66,138 @@ def download_generation_demand(client: EntsoePandasClient, config: PipelineConfi
             load_df.to_csv(raw_dir / f"{bz}_raw_load.csv")
             df_to_timescale(gen_df, f"{bz}_raw_load", config.db_schema_name)
 
-
 def process_generation_demand(config: PipelineConfig) -> Dict[str, pd.DataFrame]:
-    """Cleans/Resamples data. Iterates over ALL ZONES to build full dataset."""
+    """
+    Cleans, resamples, and merges raw generation and load data.
+    Enforces gap-filling heuristics and recalculates structural net exports.
+    Operates in two phases to guarantee a globally synchronized data vintage.
+    """
     raw_dir = config.get_output_path("generation_demand_data_bidding_zones") / "raw"
     out_dir = config.get_output_path("generation_demand_data_bidding_zones")
     gaps_dir = config.get_gaps_path("generation_demand_data_bidding_zones")
-    gen_storage_dict = {}
+    
+    gen_storage_dict: Dict[str, pd.DataFrame] = {}
+    vintages = []
 
+    # ========================================================
+    # PHASE 1: PROCESS AND COLLECT
+    # ========================================================
+    # Ingest data, apply local transformations, and collect metadata strings
     for bz in config.zones:
+        logger.info(f"[Process] Gen./Demand for {bz}...")
         gen_path = raw_dir / f"{bz}_raw_generation.csv"
         load_path = raw_dir / f"{bz}_raw_load.csv"
-        if not gen_path.exists() and not load_path.exists(): continue
-
-        print(f"[Process] Gen/Demand for {bz}...")
+        
         gen_df = pd.read_csv(gen_path, index_col=0) if gen_path.exists() else None
         load_df = pd.read_csv(load_path, index_col=0) if load_path.exists() else None
+        
+        # Helper to extract the data vintage from either internal columns or OS file metadata
+        def extract_vintage(df: Optional[pd.DataFrame], path: Path) -> None:
+            if df is not None:
+                if "download_timestamp" in df.columns:
+                    vintages.append(str(df["download_timestamp"].iloc[0]).split()[0])
+                elif "source_download_date" in df.columns:
+                    vintages.append(str(df["source_download_date"].iloc[0]).split()[0])
+                elif path.exists():
+                    vintages.append(datetime.fromtimestamp(path.stat().st_mtime).strftime('%Y-%m-%d'))
+                else:
+                    vintages.append(pd.Timestamp.utcnow().strftime('%Y-%m-%d'))
 
+        extract_vintage(gen_df, gen_path)
+        extract_vintage(load_df, load_path)
+
+        if gen_df is None and load_df is None:
+            logger.warning(f"No raw generation/load data found for {bz}. Skipping.")
+            continue
+
+        meta_cols = ["download_timestamp", "bidding_zone", "gap_filling_method"]
+
+        # 1. Process Generation Data
         if gen_df is not None:
-            gen_df.index = pd.to_datetime(gen_df.index, utc=True)
-            gen_df = gen_df.loc[:, ~gen_df.columns.duplicated()].apply(pd.to_numeric, errors='coerce')
-            gen_df = gen_df.resample("1h").mean()
+            gen_df = gen_df.loc[:, ~gen_df.columns.duplicated()]
             
-            # --- GAP FILLING (Generation) ---
-            # Now passes directory and prefix directly
-            gen_df = fill_gaps_wrapper(gen_df, gaps_dir, f"{bz}_gen")
+            # Isolate numerical features prior to resampling to avoid metadata corruption
+            data_cols = [c for c in gen_df.columns if c not in meta_cols]
+            gen_df[data_cols] = gen_df[data_cols].apply(pd.to_numeric, errors='coerce')
+            gen_df = gen_df.resample("1h").mean(numeric_only=True)
 
-            # --- STORAGE EXTRACTION & AGGREGATION ---
-            storage_cols = ["Hydro Pumped Storage", "Energy storage"]
-            existing_storage = [c for c in storage_cols if c in gen_df.columns]
+            gen_df = fill_gaps_wrapper(gen_df, gaps_dir, f"{bz}_gen", config=config, bz=bz)
 
-            if existing_storage:
-                # Sum the storage columns (fillna handles NaNs during addition)
-                storage_series = gen_df[existing_storage].fillna(0).sum(axis=1)
-                # Drop them so they aren't part of the regular generation clip/sum
-                gen_df = gen_df.drop(columns=existing_storage)
+            # Handle storage components separately to calculate distinct charge/discharge profiles
+            storage_cols = [c for c in ["Hydro Pumped Storage", "Energy storage"] if c in gen_df.columns]
+            if storage_cols:
+                storage_series = gen_df[storage_cols].fillna(0).sum(axis=1)
+                gen_df = gen_df.drop(columns=storage_cols)
             else:
                 storage_series = None
 
-            # --- NEGATIVE CLIPPING ---
-            # Clip all remaining regular generation columns to 0 (removes negative station load)
-            gen_df = gen_df.clip(lower=0.0)
+            num_cols = gen_df.select_dtypes(include=['number']).columns
+            if "gap_filling_method" not in gen_df.columns:
+                gen_df["gap_filling_method"] = "None"
 
-            # --- TOTALS ---
-            gen_df["Generation"] = gen_df.sum(axis=1)
+            # Enforce non-negativity constraint on generation sources
+            for col in num_cols:
+                col_neg_mask = gen_df[col] < 0
+                if col_neg_mask.any():
+                    gen_df[col] = gen_df[col].clip(lower=0.0)
+                    method_tag = f"[{col}] CLIPPED_NEGATIVE"
+                    curr_methods = gen_df.loc[col_neg_mask, "gap_filling_method"]
+                    gen_df.loc[col_neg_mask, "gap_filling_method"] = curr_methods.apply(
+                        lambda x: method_tag if str(x) == "None"
+                        else (x if method_tag in str(x) else f"{x}, {method_tag}")
+                    )
 
-            if storage_series is not None:
-                gen_df["Storage Discharge"] = storage_series.clip(lower=0.0)
-                gen_df["Storage Charge"] = storage_series.clip(upper=0.0).abs()
-            else:
-                gen_df["Storage Discharge"] = 0.0
-                gen_df["Storage Charge"] = 0.0
+            # Aggregate physical totals
+            gen_df["Generation"] = gen_df[num_cols].sum(axis=1)
+            gen_df["Storage Discharge"] = storage_series.clip(lower=0.0) if storage_series is not None else 0.0
+            gen_df["Storage Charge"] = storage_series.clip(upper=0.0).abs() if storage_series is not None else 0.0
 
+        # 2. Process Load Data
         if load_df is not None:
-            load_df.index = pd.to_datetime(load_df.index, utc=True)
-            load_df = load_df.apply(pd.to_numeric, errors='coerce').resample("1h").mean()
-            
-            # --- GAP FILLING (Load) ---
-            load_df = fill_gaps_wrapper(load_df, gaps_dir, f"{bz}_load")
+            data_cols = [c for c in load_df.columns if c not in meta_cols]
+            load_df[data_cols] = load_df[data_cols].apply(pd.to_numeric, errors='coerce')
+            load_df = load_df.resample("1h").mean(numeric_only=True)
+            load_df = fill_gaps_wrapper(load_df, gaps_dir, f"{bz}_load", config=config, bz=bz)
 
+        # 3. Merge and Balance
         if gen_df is not None:
             if load_df is not None:
-                col_map = {"Actual Load": "Demand", "Load": "Demand"}
-                for k, v in col_map.items():
+                for k in ["Actual Load", "Load"]:
                     if k in load_df.columns: gen_df["Demand"] = load_df[k]
                 
+                _merge_gap_methods(gen_df, load_df)
+
                 gen_df["Total Generation"] = gen_df["Generation"] + gen_df["Storage Discharge"]
                 gen_df["Total Load"] = gen_df.get("Demand", 0) + gen_df["Storage Charge"]
-                gen_df["Net Export"] = gen_df["Total Generation"] - gen_df["Total Load"]
             
-            # Zero Correction (1-week patch)
+            # Identify and patch systemic zeros
             gen_df = correct_zero_values(gen_df, gaps_dir, bz, config)
-            
-            gen_df.to_csv(out_dir / f"{bz}_generation_demand_data_bidding_zones.csv")
-            df_to_timescale(gen_df, f"{bz}_generation_demand_data_bidding_zones", config.db_schema_name)
+
+            # Recalculate Net Export strictly post-patching to preserve arithmetic integrity
+            if "Total Generation" in gen_df.columns and "Total Load" in gen_df.columns:
+                gen_df["Net Export"] = gen_df["Total Generation"] - gen_df["Total Load"]
+
+            # Store in memory to await global synchronization
             gen_storage_dict[bz] = gen_df
+
+    # ========================================================
+    # PHASE 2: SYNCHRONIZE VINTAGE AND SAVE
+    # ========================================================
+    # Determines the latest temporal vintage across all processed zones and applies it globally
+    if vintages:
+        current_batch_latest = max(vintages)
+        existing_global = getattr(config, "analysis_source_date", current_batch_latest)
+        config.analysis_source_date = max(existing_global, current_batch_latest)
+
+        unique_dates = set(vintages)
+        if len(unique_dates) > 1:
+            logger.warning(f"Data vintage mismatch detected in Gen/Load: {unique_dates}. Synchronized to {config.analysis_source_date}.")
+        else:
+            logger.info(f"[Metadata] Gen/Load data vintage synchronized to: {config.analysis_source_date}")
+
+    # Commit synchronized dataframes to designated IO channels
+    for bz, final_df in gen_storage_dict.items():
+        io.save(final_df, out_dir / f"{bz}_generation_demand_data_bidding_zones.csv", "processed_generation", config, bz=bz)
 
     return gen_storage_dict
 
@@ -151,95 +207,122 @@ def process_generation_demand(config: PipelineConfig) -> Dict[str, pd.DataFrame]
 
 def download_flows(client: EntsoePandasClient, config: PipelineConfig, flow_type: str = "commercial", dayahead: bool = False):
     """
-    Downloads raw commercial or physical flows. 
-    Iterates strictly over TARGET ZONES as defined in config.
+    Downloads scheduled commercial or physical cross-border exchanges.
+    Builds the bilateral combinations based on the defined neighbor map.
     """
-    # Check if this data type is enabled in config
     if flow_type == "commercial" and not config.data_types.get(f"flows_commercial{'_dayahead' if dayahead else '_total'}"): return
     if flow_type == "physical" and not config.data_types.get("flows_physical"): return
 
-    # Determine output folder
-    if flow_type == "physical":
-        folder = "physical_flow_data_bidding_zones"
-    else:
-        folder = f"comm_flow_{'dayahead' if dayahead else 'total'}_bidding_zones"
-        
+    folder = "physical_flow_data_bidding_zones" if flow_type == "physical" else f"comm_flow_{'dayahead' if dayahead else 'total'}_bidding_zones"
     raw_dir = config.get_output_path(folder) / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)
 
     for bz in config.target_zones:
-        print(f"[Download] {flow_type} flows for {bz} (Dayahead={dayahead})...")
-        flow_df = None
+        logger.info(f"[Download] {flow_type} flows for {bz} (Dayahead={dayahead})...")
 
-        timescale_table_name = get_flow_table_name(bz, flow_type, dayahead, raw = True)
-        
-        # Iterate over neighbors
+        flow_df: Optional[pd.DataFrame] = None
         for n in [z for z in config.neighbours_map[bz] if z in config.zones]:
-            out_label = f"{flow_type} {bz}->{n}"
-            in_label = f"{flow_type} {n}->{bz}"
-            
-            # Fetch Outgoing and Incoming flows
             if flow_type == "commercial":
-                f_out = safe_query(client.query_scheduled_exchanges, context=out_label, country_code_from=bz, country_code_to=n, start=config.start, end=config.end, dayahead=dayahead)
-                f_in = safe_query(client.query_scheduled_exchanges, context=in_label, country_code_from=n, country_code_to=bz, start=config.start, end=config.end, dayahead=dayahead)
+                f_out = safe_query(client.query_scheduled_exchanges, context=f"{bz}->{n}", country_code_from=bz, country_code_to=n, start=config.start, end=config.end, dayahead=dayahead)
+                f_in = safe_query(client.query_scheduled_exchanges, context=f"{n}->{bz}", country_code_from=n, country_code_to=bz, start=config.start, end=config.end, dayahead=dayahead)
             else:
-                f_out = safe_query(client.query_crossborder_flows, context=out_label, country_code_from=bz, country_code_to=n, start=config.start, end=config.end)
-                f_in = safe_query(client.query_crossborder_flows, context=in_label, country_code_from=n, country_code_to=bz, start=config.start, end=config.end)
+                f_out = safe_query(client.query_crossborder_flows, context=f"{bz}->{n}", country_code_from=bz, country_code_to=n, start=config.start, end=config.end)
+                f_in = safe_query(client.query_crossborder_flows, context=f"{n}->{bz}", country_code_from=n, country_code_to=bz, start=config.start, end=config.end)
 
-            # Concatenate flows, ensuring no duplicate indices interfere
-            if f_out is not None: 
-                f_out = f_out.loc[~f_out.index.duplicated(keep='first')]
-                flow_df = pd.concat([flow_df, f_out.to_frame(name=f"{bz}_{n}")], axis=1)
-            
-            if f_in is not None: 
-                f_in = f_in.loc[~f_in.index.duplicated(keep='first')]
-                flow_df = pd.concat([flow_df, f_in.to_frame(name=f"{n}_{bz}")], axis=1)
+            if f_out is not None: flow_df = pd.concat([flow_df, f_out.loc[~f_out.index.duplicated()].to_frame(name=f"{bz}_{n}")], axis=1)
+            if f_in is not None: flow_df = pd.concat([flow_df, f_in.loc[~f_in.index.duplicated()].to_frame(name=f"{n}_{bz}")], axis=1)
 
-        # Save raw file if data was found
         if flow_df is not None: 
             flow_df = flow_df.loc[~flow_df.index.duplicated(keep='first')]
             flow_df.to_csv(raw_dir / f"{bz}_raw_flows.csv")
-            df_to_timescale(flow_df, timescale_table_name, config.db_schema_name)
+            table_name = f"{bz}_raw_{flow_type}_flows{'_dayahead' if dayahead else ''}"
+
+            df_to_timescale(flow_df, table_name, config.db_schema_name)
+
 
 def process_flows(config: PipelineConfig, flow_type: str = "commercial", dayahead: bool = False) -> Dict[str, pd.DataFrame]:
-    """Processes flows for ALL ZONES."""
+    """
+    Standardizes bilateral flow matrices, applies gap imputation, and evaluates zero-flow legitimacy.
+    Operates in two phases to guarantee a globally synchronized data vintage.
+    """
+    folder = "physical_flow_data_bidding_zones" if flow_type == "physical" else f"comm_flow_{'dayahead' if dayahead else 'total'}_bidding_zones"
+    raw_dir, out_dir, gaps_dir = config.get_output_path(folder) / "raw", config.get_output_path(folder), config.get_gaps_path(folder)
     
-    if flow_type == "physical":
-        folder = "physical_flow_data_bidding_zones"
-    else:
-        folder = f"comm_flow_{'dayahead' if dayahead else 'total'}_bidding_zones"
-        
-    raw_dir, out_dir = config.get_output_path(folder) / "raw", config.get_output_path(folder)
-    gaps_dir = config.get_gaps_path(folder)
-    flow_dict = {}
+    flow_dict: Dict[str, pd.DataFrame] = {}
+    vintages = []
 
+    # ========================================================
+    # PHASE 1: PROCESS AND COLLECT
+    # ========================================================
     for bz in config.zones:
-        raw_path = raw_dir / f"{bz}_raw_flows.csv"
-        if not raw_path.exists(): continue
+        table_name = f"raw_{flow_type}_flows" + ("_da" if dayahead else "")
+        flow_path = raw_dir / f"{bz}_raw_flows.csv"
 
-        timescale_table_name = get_flow_table_name(bz, flow_type, dayahead, raw = False)
+        df: Optional[pd.DataFrame] = io.load(flow_path, table_name, config, bz=bz)
 
-        print(f"[Process] {flow_type} flows for {bz}...")
-        df = pd.read_csv(raw_path, index_col=0)
-        df.index = pd.to_datetime(df.index, utc=True)
-        df = df.resample("1h").mean()
+        if df is not None:
+            # 1. Primary: Check internal columns for data lineage
+            if "download_timestamp" in df.columns:
+                v = str(df["download_timestamp"].iloc[0]).split()[0]
+            elif "source_download_date" in df.columns:
+                v = str(df["source_download_date"].iloc[0]).split()[0]
+            elif flow_path and flow_path.exists():
+                v = datetime.fromtimestamp(flow_path.stat().st_mtime).strftime('%Y-%m-%d')
+            else:
+                v = pd.Timestamp.utcnow().strftime('%Y-%m-%d')
+
+            vintages.append(v)
+        else:
+            logger.warning(f"No raw flow data found for {bz} in {raw_dir}. Skipping processing for this zone.")
+            continue
+
+        meta_cols = ["download_timestamp", "bidding_zone", "gap_filling_method"]
+        data_cols = [c for c in df.columns if c not in meta_cols]
+
+        # Isolate numerical features prior to resampling
+        df[data_cols] = df[data_cols].apply(pd.to_numeric, errors='coerce')
+        df_resampled = df.resample("1h").mean(numeric_only=True)
+
+        df = fill_gaps_wrapper(df_resampled, gaps_dir, f"{bz}_flows", config=config, bz=bz, flow_type=flow_type, dayahead=dayahead)
         
-        # --- GAP FILLING (Flows) ---
-        df = fill_gaps_wrapper(df, gaps_dir, f"{bz}_flows", config=config, bz=bz, 
-                               flow_type=flow_type, dayahead=dayahead)
-        
-        # Calculate Net Exports per neighbor
+        logger.info(f"[Process] {flow_type} flows for {bz} (Dayahead={dayahead})...")
+
+        # Establish localized net border exports
         net_df = pd.DataFrame(index=df.index)
         for n in [z for z in config.neighbours_map[bz] if z in config.zones]:
-            if f"{bz}_{n}" in df.columns and f"{n}_{bz}" in df.columns:
-                net_df[f"{bz}_{n}_net_export"] = df[f"{bz}_{n}"] - df[f"{n}_{bz}"]
+            col_out = f"{bz}_{n}"
+            col_in = f"{n}_{bz}"
+
+            if col_out in df.columns or col_in in df.columns:
+                out_series = df[col_out] if col_out in df.columns else 0.0
+                in_series = df[col_in] if col_in in df.columns else 0.0
+                net_df[f"{col_out}_net_export"] = out_series - in_series
         
         net_df["Net Export"] = net_df.sum(axis=1)
-        final_df = pd.concat([df, net_df], axis=1)
+
+        # Handle systemic zero-drops and force net export recalculation
+        final_df = correct_zero_values(pd.concat([df, net_df], axis=1), gaps_dir, bz, config, flow_type=flow_type)
         
-        # Zero Correction (1-week patch)
-        final_df = correct_zero_values(final_df, gaps_dir, bz, config)
+        # Store in dictionary to await global synchronization
+        flow_dict[bz] = final_df
+
+    # ========================================================
+    # PHASE 2: SYNCHRONIZE VINTAGE AND SAVE
+    # ========================================================
+    # Determines the latest temporal vintage across all flow matrices
+    if vintages:
+        current_batch_latest = max(vintages)
+        existing_global = getattr(config, "analysis_source_date", current_batch_latest)
+        config.analysis_source_date = max(existing_global, current_batch_latest)
         
+        unique_dates = set(vintages)
+        if len(unique_dates) > 1:
+            logger.warning(f"Data vintage mismatch detected in {flow_type} flows: {unique_dates}. Synchronized to {config.analysis_source_date}.")
+        else:
+            logger.info(f"[Metadata] Flow data vintage synchronized to: {config.analysis_source_date}")
+
+    # Commit synchronized dataframes to designated IO channels
+    for bz, final_df in flow_dict.items():
         filename = f"{bz}_comm_flow_{'dayahead' if dayahead else 'total'}_bidding_zones.csv" if flow_type == "commercial" else f"{bz}_physical_flow_data_bidding_zones.csv"
         final_df.to_csv(out_dir / filename)
         df_to_timescale(final_df, timescale_table_name, config.db_schema_name)
@@ -408,7 +491,7 @@ def fetch_simple_metrics(client, config):
         out_dir = config.get_output_path(name)
 
         for bz in config.target_zones:
-            print(f"Fetching {name} for {bz}...")
+            logger.info(f"Fetching {name} for {bz}...")
             df = safe_query(method, context=f"{name} {bz}", country_code=bz, start=config.start, end=config.end, **kwargs)
             if df is not None:
                 if isinstance(df, pd.Series):
@@ -427,3 +510,5 @@ def fetch_simple_metrics(client, config):
 
                 df.index = pd.to_datetime(df.index, utc=True)
                 df.resample("1h").mean().to_csv(out_dir / f"{bz}_{name}.csv")
+                df_to_timescale(df, f"{bz}_{name}", config.db_schema_name, config)
+                print(f"{bz}_{name}")
