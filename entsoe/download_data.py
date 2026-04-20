@@ -1,26 +1,45 @@
+"""
+Project: European Electricity Exchange Analysis
+Author: Tiernan Buckley
+Year: 2026
+License: Creative Commons Attribution 4.0 International (CC BY 4.0)
+Source: https://github.com/INATECH-CIG/exchange_analysis
+
+Description:
+Connects to the ENTSO-E API to download, enforce structural symmetry on, 
+and standardize raw generation, demand, and cross-border flow data.
+"""
+
 import pandas as pd
 import requests
+import logging
+from datetime import datetime
 from io import StringIO
-from typing import Dict
+from pathlib import Path
+from typing import Dict, Optional, Any
 from entsoe import EntsoePandasClient
 from config import PipelineConfig
-from utils import safe_query, fill_gaps_wrapper, correct_zero_values
+from utils import safe_query, fill_gaps_wrapper, correct_zero_values, _merge_gap_methods
 from postgres_utils import df_to_timescale, get_flow_table_name
 
-# --- GB SPECIAL CONSTANTS ---
+logger = logging.getLogger(__name__)
+
+
 TIMEOUT = 60
 GB_GENERATION_TYPES = [
-    "Biomass", "Fossil Gas", "Fossil Hard coal", "Fossil Oil",
-    "Hydro Pumped Storage", "Hydro Run-of-river and poundage",
+    "Biomass", "Fossil Gas", "Fossil Hard coal", "Fossil Oil", 
+    "Hydro Pumped Storage", "Hydro Run-of-river and poundage", 
     "Nuclear", "Other", "Solar", "Wind Offshore", "Wind Onshore"
 ]
 
 # ==========================================
 # GENERATION & DEMAND
 # ==========================================
-
-def download_generation_demand(client: EntsoePandasClient, config: PipelineConfig):
-    """Downloads raw Gen/Demand data. Iterates strictly over TARGET ZONES."""
+def download_generation_demand(client: EntsoePandasClient, config: PipelineConfig) -> None:
+    """
+    Retrieves raw generation and demand data for configured target zones.
+    Routes GB queries to the BMRS API and all others to the ENTSO-E client.
+    """
     if not config.data_types["generation"]: return
 
     raw_dir = config.get_output_path("generation_demand_data_bidding_zones") / "raw"

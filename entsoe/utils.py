@@ -2,7 +2,147 @@ import time
 import pandas as pd
 import numpy as np
 import sys
+import logging
+from pathlib import Path
+from typing import Dict, Optional, List, Tuple, Any, Callable, Union
 import os
+
+logger = logging.getLogger(__name__)
+
+
+class DataIO:
+    """
+    Centralized Data Input/Output Handler.
+    Orchestrates dual-writing to local flat CSV files and a configured database instance.
+    """
+
+    def __init__(self, config: Any) -> None:
+        self.save_db = getattr(config, 'save_db', False)
+        self.load_source = getattr(config, 'load_source', 'csv')
+
+        if self.save_db or self.load_source == 'db':
+            pass
+        else:
+            self.engine = None
+            logger.info("[IO] Running in CSV-only mode. No database engine initialized.")
+
+    def save(self, df: Optional[Union[pd.DataFrame, pd.Series]], filepath: Path, table_name: str, config: Any,
+             bz: Optional[str] = None) -> None:
+        """Persists structural arrays to defined storage mediums, handling schema evolution."""
+        if df is None or df.empty: return
+
+        df_out = df.to_frame() if isinstance(df, pd.Series) else df.copy()
+
+        if bz is not None:
+            df_out["bidding_zone"] = bz
+
+        # Route metadata structures based on whether the data is raw extraction or downstream analysis
+        is_result_table = table_name.startswith(("analysis_", "tracing_", "pool_", "annual_", "processed_"))
+
+        if is_result_table:
+            date_val = getattr(config, 'analysis_source_date', pd.Timestamp.utcnow().strftime('%Y-%m-%d'))
+            df_out["source_download_date"] = date_val
+            meta_cols = ["gap_filling_method", "bidding_zone", "source_download_date"]
+        else:
+            df_out["download_timestamp"] = pd.Timestamp.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
+            meta_cols = ["gap_filling_method", "bidding_zone", "download_timestamp"]
+
+        # Enforce column order to maintain tabular consistency
+        data_cols = [c for c in df_out.columns if c not in meta_cols]
+        present_meta = [c for c in meta_cols if c in df_out.columns]
+        df_out = df_out[data_cols + present_meta]
+
+        # 1. Execute local flat-file persistence
+        if getattr(config, 'save_csv', True):
+            filepath.parent.mkdir(parents=True, exist_ok=True)
+            df_out.to_csv(filepath)
+
+        # 2. Execute relational database persistence
+        if getattr(config, 'save_db', True):
+            #clean_table = table_name.lower().replace("-", "_").replace(" ", "_")[:63]
+
+            if bz is not None:
+                if isinstance(df.index, pd.DatetimeIndex):
+                    min_time = df.index.min().strftime('%Y-%m-%d %H:%M:%S%z')
+                    max_time = df.index.max().strftime('%Y-%m-%d %H:%M:%S%z')
+                    index_col = df.index.name or 'index'
+
+                    delete_query = text(f"""
+                        DELETE FROM {clean_table}
+                        WHERE bidding_zone = '{bz}'
+                        AND "{index_col}" >= '{min_time}'
+                        AND "{index_col}" <= '{max_time}'
+                    """)
+                else:
+                    delete_query = text(f"""
+                        DELETE FROM {clean_table}
+                        WHERE bidding_zone = '{bz}'
+                    """)
+
+                with self.engine.begin() as conn:
+                    try:
+                        conn.execute(delete_query)
+                    except Exception:
+                        pass
+
+                        # Evaluate and apply dynamic schema evolution
+            try:
+                inspector = inspect(self.engine)
+                if inspector.has_table(clean_table):
+                    existing_cols = [col['name'] for col in inspector.get_columns(clean_table)]
+                    new_cols = [c for c in df_out.columns if c not in existing_cols]
+
+                    if new_cols:
+                        with self.engine.begin() as conn:
+                            for c in new_cols:
+                                col_type = "TEXT" if c in meta_cols else "DOUBLE PRECISION"
+                                conn.execute(text(f'ALTER TABLE {clean_table} ADD COLUMN "{c}" {col_type}'))
+            except Exception as e:
+                logger.warning(f"[DB Schema Warning] Could not auto-evolve schema for {clean_table}: {e}")
+
+            try:
+                df_out.to_sql(clean_table, self.engine, if_exists="append")
+            except Exception as e:
+                logger.error(f"[DB Error] Failed to save {clean_table} to database: {e}")
+
+    def load(self, filepath: Path, table_name: str, config: Any, bz: Optional[str] = None) -> Optional[pd.DataFrame]:
+        """Retrieves stored datasets based on configured storage preference (CSV vs DB)."""
+        source = getattr(config, 'load_source', 'csv')
+        start_str = config.start.strftime('%Y-%m-%d %H:%M:%S%z')
+        end_str = config.end.strftime('%Y-%m-%d %H:%M:%S%z')
+
+        if source == 'db':
+            clean_table = table_name.lower().replace("-", "_").replace(" ", "_")[:63]
+            try:
+                base_query = f'SELECT * FROM {clean_table} WHERE "index" >= \'{start_str}\' AND "index" <= \'{end_str}\''
+                query = f"{base_query} AND bidding_zone = '{bz}'" if bz is not None else base_query
+
+                df = pd.read_sql(text(query), self.engine)
+                if df.empty:
+                    raise ValueError(f"No data found in DB for {clean_table} (bz={bz})")
+
+                index_col = str(df.columns[0])
+                df.set_index(index_col, inplace=True)
+                df.index = pd.to_datetime(df.index, utc=True)
+                df.index.name = None
+
+                if bz is not None and "bidding_zone" in df.columns:
+                    df = df.drop(columns=["bidding_zone"])
+
+                df.dropna(axis=1, how='all', inplace=True)
+                return df
+
+            except Exception as e:
+                logger.warning(f"[DB Warning] Falling back to CSV for {clean_table} (bz={bz}). Reason: {e}")
+
+        if filepath.exists():
+            df = pd.read_csv(filepath, index_col=0)
+            df.index = pd.to_datetime(df.index, utc=True)
+            mask = (df.index >= config.start) & (df.index <= config.end)
+            return df.loc[mask]
+
+        return None
+
 
 # ==========================================
 # LOGGING UTILS
@@ -22,19 +162,39 @@ class DualLogger:
         self.terminal.flush()
         self.log.flush()
 
-def start_logging(log_file_path):
-    """Sets up stdout/stderr redirection."""
-    log_dir = os.path.dirname(log_file_path)
-    if log_dir: os.makedirs(log_dir, exist_ok=True)
+def _record_gap_method(df: pd.DataFrame, start: pd.Timestamp, end: pd.Timestamp, method: str, col_name: str = "ROW") -> None:
+    """Appends the specified imputation methodology to the metadata audit trail for a given temporal range."""
+    if "gap_filling_method" not in df.columns:
+        df["gap_filling_method"] = "None"
 
-    if isinstance(sys.stdout, DualLogger): sys.stdout = sys.stdout.terminal
-    if isinstance(sys.stderr, DualLogger): sys.stderr = sys.stderr.terminal
+    mask = (df.index >= start) & (df.index <= end)
+    tagged_method = f"[{col_name}] {method}"
 
-    sys.stdout = DualLogger(log_file_path, sys.stdout)
-    sys.stderr = DualLogger(log_file_path, sys.stderr)
+    none_mask = mask & (df["gap_filling_method"] == "None")
+    df.loc[none_mask, "gap_filling_method"] = tagged_method
+
+    exist_mask = mask & (df["gap_filling_method"] != "None")
+
+    def append_if_missing(current: str) -> str:
+        return current if tagged_method in str(current) else f"{current}, {tagged_method}"
+
+    df.loc[exist_mask, "gap_filling_method"] = df.loc[exist_mask, "gap_filling_method"].apply(append_if_missing)
+
+def _merge_gap_methods(df_target: pd.DataFrame, df_source: pd.DataFrame) -> None:
+    """Consolidates metadata strings when combining parallel datasets to maintain a unified audit trail."""
+    if "gap_filling_method" not in df_source.columns: return
+    if "gap_filling_method" not in df_target.columns:
+        df_target["gap_filling_method"] = "None"
+
+    valid_methods = df_source.loc[(df_source["gap_filling_method"] != "None") & df_source["gap_filling_method"].notna(), "gap_filling_method"]
     
-    print(f"--- Log Started: {pd.Timestamp.now()} ---")
-    print(f"Saving logs to: {log_file_path}")
+    for t, method in valid_methods.items():
+        if t in df_target.index:
+            curr = df_target.at[t, "gap_filling_method"]
+            if curr == "None":
+                df_target.at[t, "gap_filling_method"] = method
+            elif method not in str(curr):
+                df_target.at[t, "gap_filling_method"] = f"{curr}, {method}"
 
 # ==========================================
 # API UTILS
@@ -247,29 +407,21 @@ def find_gaps(
     )
     return df, output_dict
 
-def patch_gaps_with_dayahead(flow_df, gap_dict, bz, neighbour, config, min_gap_length=pd.Timedelta(weeks=1)):
-    """
-    Patches gaps in commercial flow data using Day-Ahead (Scheduled) data 
-    if the gap duration exceeds 'min_gap_length'.
-    """
-    # 1. Check if we have any long gaps to patch
-    long_gaps = []
-    
-    # Check Outgoing Gaps (BZ -> Neighbor)
-    col_out = f"{bz}_{neighbour}"
-    if col_out in gap_dict:
-        for _, row in gap_dict[col_out].iterrows():
-            duration = row["end"] - row["start"]
-            if duration > min_gap_length:
-                long_gaps.append((col_out, row["start"], row["end"]))
-
-    # Check Incoming Gaps (Neighbor -> BZ)
-    col_in = f"{neighbour}_{bz}"
-    if col_in in gap_dict:
-        for _, row in gap_dict[col_in].iterrows():
-            duration = row["end"] - row["start"]
-            if duration > min_gap_length:
-                long_gaps.append((col_in, row["start"], row["end"]))
+def patch_gaps_with_dayahead(
+    flow_df: pd.DataFrame,
+    gap_dict: Dict[str, pd.DataFrame],
+    bz: str,
+    neighbour: str,
+    config: Any, 
+    min_gap_length: pd.Timedelta = pd.Timedelta(weeks=1)
+) -> pd.DataFrame:
+    """Leverages day-ahead commercial schedules as a physical proxy to impute extended missing flow blocks."""
+    long_gaps: List[Tuple[str, pd.Timestamp, pd.Timestamp]] = []
+    for col in [f"{bz}_{neighbour}", f"{neighbour}_{bz}"]:
+        if col in gap_dict:
+            for _, row in gap_dict[col].iterrows():
+                if (row["end"] - row["start"]) > min_gap_length:
+                    long_gaps.append((col, row["start"], row["end"]))
 
     if not long_gaps:
         return flow_df  # No long gaps, nothing to do
@@ -288,75 +440,62 @@ def patch_gaps_with_dayahead(flow_df, gap_dict, bz, neighbour, config, min_gap_l
         print(f"   [Error] Failed to load DA file for {bz}: {e}")
         return flow_df
 
-    # 3. Apply Patches
     patched_count = 0
     for col, start, end in long_gaps:
         if col in da_df.columns:
-            # logging the replacement
-            print(f"   [Patching] Replacing {col} with Day-Ahead values from {start} to {end}")
-            
-            # Ensure alignment
             replacement = da_df.loc[start:end, col]
-            
-            # If DA data is missing too, we can't patch
-            if replacement.empty or replacement.isna().all():
-                 print("      [Warning] Day-Ahead data also missing/empty for this period.")
-                 continue
-                 
-            flow_df.loc[start:end, col] = replacement
-            patched_count += 1
-        else:
-            print(f"      [Warning] Day-Ahead file missing column {col}.")
+
+            if not (replacement.empty or replacement.isna().all()):
+                flow_df.loc[start:end, col] = replacement
+                patched_count += 1
+                _record_gap_method(flow_df, start, end, "DAYAHEAD_PROXY", col_name=col)
 
     if patched_count > 0:
-        print(f"   -> Successfully patched {patched_count} long gaps using Day-Ahead data.")
-        
+        logger.info(f"   -> [Patch] Used {dayahead_path} to fill {patched_count} long-duration gaps for {bz}.")
+
     return flow_df
 
 # ==========================================
 # DATA PROCESSING WRAPPERS
 # ==========================================
 
-def fill_gaps_wrapper(df: pd.DataFrame, gaps_dir, prefix, config=None, bz=None, 
-                      flow_type=None, dayahead=False):
-    """
-    Wrapper for find_gaps.
-    1. Finds gaps.
-    2. Patches large commercial flow gaps with Day-Ahead data (if config/bz provided).
-    3. Statistically fills remaining gaps.
-    4. Saves reports.
-    """
+def fill_gaps_wrapper(df: pd.DataFrame,
+                      gaps_dir,
+                      prefix,
+                      config=None,
+                      bz=None,
+                      flow_type=None,
+                      dayahead=False) -> pd.DataFrame:
+    """Orchestrates the detection, rule assignment, and execution of the gap-filling sequence."""
     if df.empty: return df
     
-    # 1. Find initial gaps (do not fill yet)
+    if "gap_filling_method" not in df.columns:
+        df["gap_filling_method"] = "None"
+
     _, gaps_dict = find_gaps(df, check_negatives=False, fill_gaps=False)
 
-    # 2. Patch Large Gaps with Day-Ahead (Commercial Flows Only)            
     if config and bz and (flow_type == "commercial") and (not dayahead):
-        
-        if bz in config.neighbours_map:
-            potential_neighbors = config.neighbours_map[bz]
-            # Only process if the column 'BZ_Neighbor' actually exists in this DF
-            actual_neighbors = [n for n in potential_neighbors if f"{bz}_{n}" in df.columns]
-            
-            for neighbour in actual_neighbors:
+        if hasattr(config, 'neighbours_map') and bz in config.neighbours_map:
+            for neighbour in [n for n in config.neighbours_map[bz] if f"{bz}_{n}" in df.columns]:
                 df = patch_gaps_with_dayahead(df, gaps_dict, bz, neighbour, config)
 
-    # 3. Statistically Fill Remaining Gaps
-    df_filled, final_gaps = find_gaps(
-        df, 
-        check_negatives=False, 
-        fill_gaps=True, 
-        gap_filling_rules=default_rules
-    )
-    
-    # 4. Save Reports for columns that were filled
+    df_filled, new_gaps_dict = find_gaps(df, check_negatives=False, fill_gaps=True, gap_filling_rules=default_rules)
+
+    for col_name, gap_df in new_gaps_dict.items():
+        if gap_df.empty: continue
+        for _, row in gap_df.iterrows():
+            if row.get("success", True):
+                _record_gap_method(df_filled, row["start"], row["end"], row["method"], col_name=str(col_name))
+
     if gaps_dir:
-        for key, gap_df in gaps_dict.items():
+        for key, gap_df in new_gaps_dict.items():
+            file_path = gaps_dir / f"{prefix}_{str(key).replace('/', '_').replace(' ', '_')}_gaps.csv"
             if not gap_df.empty:
-                safe_key = str(key).replace("/", "_").replace(" ", "_")
-                gap_df.to_csv(gaps_dir / f"{prefix}_{safe_key}_gaps.csv")
-    
+                gap_df.to_csv(file_path)
+            else:
+                if file_path.exists():
+                    file_path.unlink()
+
     return df_filled
 
 def correct_zero_values(df: pd.DataFrame, gaps_dir, bz, config):

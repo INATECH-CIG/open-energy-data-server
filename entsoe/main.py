@@ -2,7 +2,7 @@ import sys
 from datetime import datetime
 from entsoe import EntsoePandasClient
 from config import PipelineConfig
-from utils import start_logging
+import logging
 
 # --- MODULE IMPORTS ---
 from download_data import (
@@ -22,6 +22,12 @@ from data_analysis import (
 )
 from prefect import flow
 
+logger = logging.getLogger(__name__)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s"
+)
 @flow
 def main():
     # ==========================================

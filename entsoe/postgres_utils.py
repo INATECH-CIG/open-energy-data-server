@@ -90,7 +90,7 @@ def ensure_table(tablename, schemaname, df, cur,conn):
     cur.execute(hypertable_sql, (full_table,))
     conn.commit()
 
-def df_to_timescale(df, tablename, schema_name ='public'):
+def df_to_timescale(df, tablename, schema_name ='public', config = None):
     """
     Writes a dataframe into a timescale db table
     """
@@ -98,6 +98,22 @@ def df_to_timescale(df, tablename, schema_name ='public'):
     cur = conn.cursor()
 
     df = df.reset_index().rename(columns={"index": "time"})
+
+    # Route metadata structures based on whether the data is raw extraction or downstream analysis
+    is_result_table = tablename.startswith(("analysis_", "tracing_", "pool_", "annual_", "processed_"))
+
+    if is_result_table:
+        date_val = getattr(config, 'analysis_source_date', pd.Timestamp.utcnow().strftime('%Y-%m-%d'))
+        df["source_download_date"] = date_val
+        meta_cols = ["gap_filling_method", "bidding_zone", "source_download_date"]
+    else:
+        df["download_timestamp"] = pd.Timestamp.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
+        meta_cols = ["gap_filling_method", "bidding_zone", "download_timestamp"]
+
+    # Enforce column order to maintain tabular consistency
+    data_cols = [c for c in df.columns if c not in meta_cols]
+    present_meta = [c for c in meta_cols if c in df.columns]
+    df = df[data_cols + present_meta]
 
     ensure_schema(schema_name, 'readonly', cur, conn)
     ensure_table(tablename, schema_name, df, cur, conn)
