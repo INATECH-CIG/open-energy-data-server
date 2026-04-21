@@ -42,6 +42,7 @@ def download_generation_demand(client: EntsoePandasClient, config: PipelineConfi
     """
     if not config.data_types["generation"]: return
     raw_dir = config.get_output_path("generation_demand_data_bidding_zones") / "raw"
+    raw_dir.mkdir(parents=True, exist_ok=True)
     
     for bz in config.target_zones:
         logger.info(f"[Download] Gen/Demand for {bz}...")
@@ -84,13 +85,16 @@ def process_generation_demand(config: PipelineConfig) -> Dict[str, pd.DataFrame]
     # ========================================================
     # Ingest data, apply local transformations, and collect metadata strings
     for bz in config.zones:
-        logger.info(f"[Process] Gen./Demand for {bz}...")
         gen_path = raw_dir / f"{bz}_raw_generation.csv"
         load_path = raw_dir / f"{bz}_raw_load.csv"
-        
-        gen_df = pd.read_csv(gen_path, index_col=0) if gen_path.exists() else None
-        load_df = pd.read_csv(load_path, index_col=0) if load_path.exists() else None
-        
+
+        gen_df = pd.read_csv(gen_path,  index_col=0, parse_dates=True) if gen_path.exists() else None
+        load_df = pd.read_csv(load_path,  index_col=0, parse_dates=True) if load_path.exists() else None
+
+        if not gen_path.exists() and not load_path.exists(): continue
+
+        logger.info(f"[Process] Gen./Demand for {bz}...")
+
         # Helper to extract the data vintage from either internal columns or OS file metadata
         def extract_vintage(df: Optional[pd.DataFrame], path: Path) -> None:
             if df is not None:
@@ -197,7 +201,7 @@ def process_generation_demand(config: PipelineConfig) -> Dict[str, pd.DataFrame]
 
     # Commit synchronized dataframes to designated IO channels
     for bz, final_df in gen_storage_dict.items():
-        io.save(final_df, out_dir / f"{bz}_generation_demand_data_bidding_zones.csv", "processed_generation", config, bz=bz)
+        df_to_timescale(final_df, f"{bz}_generation_demand", config.db_schema_name)
 
     return gen_storage_dict
 
@@ -255,10 +259,11 @@ def process_flows(config: PipelineConfig, flow_type: str = "commercial", dayahea
     # PHASE 1: PROCESS AND COLLECT
     # ========================================================
     for bz in config.zones:
-        table_name = f"raw_{flow_type}_flows" + ("_da" if dayahead else "")
         flow_path = raw_dir / f"{bz}_raw_flows.csv"
-
-        df: Optional[pd.DataFrame] = io.load(flow_path, table_name, config, bz=bz)
+        raw_path = raw_dir / f"{bz}_raw_flows.csv"
+        if not raw_path.exists() : continue
+        logger.info(f"[Process] Flows for {bz}...")
+        df = pd.read_csv(raw_path, index_col=0, parse_dates=True)
 
         if df is not None:
             # 1. Primary: Check internal columns for data lineage
@@ -325,6 +330,7 @@ def process_flows(config: PipelineConfig, flow_type: str = "commercial", dayahea
     for bz, final_df in flow_dict.items():
         filename = f"{bz}_comm_flow_{'dayahead' if dayahead else 'total'}_bidding_zones.csv" if flow_type == "commercial" else f"{bz}_physical_flow_data_bidding_zones.csv"
         final_df.to_csv(out_dir / filename)
+        timescale_table_name = f"{bz}_{flow_type}_flows{'_dayahead' if dayahead else ''}"
         df_to_timescale(final_df, timescale_table_name, config.db_schema_name)
         flow_dict[bz] = final_df
 
@@ -511,4 +517,3 @@ def fetch_simple_metrics(client, config):
                 df.index = pd.to_datetime(df.index, utc=True)
                 df.resample("1h").mean().to_csv(out_dir / f"{bz}_{name}.csv")
                 df_to_timescale(df, f"{bz}_{name}", config.db_schema_name, config)
-                print(f"{bz}_{name}")

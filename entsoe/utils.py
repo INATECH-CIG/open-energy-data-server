@@ -323,6 +323,10 @@ def find_gaps_series(
     fill_gaps: bool = False,
     gap_filling_rules: callable = None,
 ):
+
+    if not pd.api.types.is_numeric_dtype(series):
+        return series
+
     # Clean massive outliers
     series = series.where(series < 100000, np.nan)
 
@@ -498,44 +502,167 @@ def fill_gaps_wrapper(df: pd.DataFrame,
 
     return df_filled
 
-def correct_zero_values(df: pd.DataFrame, gaps_dir, bz, config):
+def correct_zero_values(df: pd.DataFrame, gaps_dir: Path, bz: str, config: Any,
+                        flow_type: str = "commercial") -> pd.DataFrame:
     """
-    Patches zero-values using data from +/- 1 week.
-    - Generation: Checks if 'Total Generation' == 0.
-    - Flows: Checks if the entire row (all columns) sum to 0.
+    Identifies and categorizes mathematically singular states (0 MW) as either
+    systemic dropouts or isolated bilateral failures, applying tiered fallback methodologies.
+    Strictly recalculates net positions to preserve arithmetic closure.
     """
     if df.empty: return df
+    if "gap_filling_method" not in df.columns: df["gap_filling_method"] = "None"
 
-    # 1. Determine Zero Mask based on Data Type
+    num_df = df.select_dtypes(include=[np.number])
+    if num_df.empty: return df
+
+    # Isolate physical base flow columns to prevent recursive patching of derived metrics
+    base_flow_cols = [c for c in num_df.columns if "Net Export" not in c and "_net_export" not in c]
+
+    # ========================================================
+    # PHASE 1: ZERO IDENTIFICATION AND AUDIT LOGGING
+    # ========================================================
     if "Total Generation" in df.columns:
-        # Generation Logic
-        zeros_mask = df["Total Generation"] == 0
+        gen_mask = df.get("Total Generation", pd.Series(1, index=df.index)) == 0
+        load_mask = df.get("Total Load", df.get("Demand", pd.Series(1, index=df.index))) == 0
+        global_zero_mask = gen_mask | load_mask
     else:
-        # Flow Logic: Check if row has no active flows (all numeric cols are 0)
-        numeric_cols = df.select_dtypes(include=[np.number])
-        zeros_mask = (numeric_cols != 0).sum(axis=1) == 0
+        # Evaluate for complete nodal isolation (systemic reporting failure)
+        global_zero_mask = (num_df[base_flow_cols] == 0).all(axis=1)
 
-    zeros_df = df[zeros_mask]
+        # Exempt defined geographic islands where zero-flow states are physically permissible
+        if bz in getattr(config, 'valid_zero_zones', []):
+            global_zero_mask = pd.Series(False, index=df.index)
 
-    # 2. Patch Data if Zeros Found
-    if len(zeros_df) > 0:
-        print(f"   -> [{bz}] Found {len(zeros_df)} zero-rows. Patching with +/- 1 week data...")
-        one_week = pd.Timedelta(weeks=1)
-        range_start = config.start
+    zeros_df = df[global_zero_mask]
+    file_path = gaps_dir / f"{bz}_zeros.csv"
 
-        for timestamp in zeros_df.index:
-            # Default: Look back 1 week
-            patch_time = timestamp - one_week
-            
-            # If 1 week back is before start date, look forward 1 week
-            if patch_time < range_start:
-                patch_time = timestamp + one_week
-            
-            # Apply patch if data exists
-            if patch_time in df.index:
-                df.loc[timestamp] = df.loc[patch_time]
+    if not zeros_df.empty:
+        zeros_df.to_csv(file_path)
+    else:
+        if file_path.exists(): file_path.unlink()
 
-        # 3. Save Log
-        zeros_df.to_csv(gaps_dir / f"{bz}_zeros.csv")
+    # ========================================================
+    # PHASE 2: TIERED PATCHING LOGIC
+    # ========================================================
+    one_week = pd.Timedelta(weeks=1)
+
+    def apply_patch(condition_mask: pd.Series, cols: list, prefix: str):
+        if not condition_mask.any() or not cols: return
+
+        blocks = condition_mask.ne(condition_mask.shift()).cumsum()
+        gap_lengths = condition_mask.groupby(blocks).transform('count')
+        clean_mean = num_df[cols].replace(0, np.nan).mean().fillna(0)
+
+        for timestamp in df[condition_mask].index:
+            success = False
+            gap_len = gap_lengths.at[timestamp]
+
+            if gap_len > 24:
+                df.loc[timestamp, cols] = clean_mean
+                _record_gap_method(df, timestamp, timestamp, f"{prefix}_LONG_GAP_GLOBAL_MEAN", "SYSTEM")
+                continue
+
+            if gap_len <= 3:
+                try:
+                    block_id = blocks.at[timestamp]
+                    block_timestamps = df[blocks == block_id].index
+                    prev_t, next_t = block_timestamps[0] - pd.Timedelta(hours=1), block_timestamps[-1] + pd.Timedelta(
+                        hours=1)
+
+                    if prev_t in df.index and next_t in df.index:
+                        val_prev, val_next = df.loc[prev_t, cols], df.loc[next_t, cols]
+                        if val_prev.sum() > 0 and val_next.sum() > 0:
+                            pos = list(block_timestamps).index(timestamp) + 1
+                            step = (val_next - val_prev) / (gap_len + 1)
+                            df.loc[timestamp, cols] = val_prev + (step * pos)
+                            _record_gap_method(df, timestamp, timestamp, f"{prefix}_LINEAR", "SYSTEM")
+                            success = True
+                except Exception:
+                    pass
+
+            if not success:
+                patch_time = timestamp - one_week
+                if patch_time < getattr(config, 'start', df.index.min()): patch_time = timestamp + one_week
+                if patch_time in df.index:
+                    donor = df.loc[patch_time, cols]
+                    if donor.sum() > 0:
+                        df.loc[timestamp, cols] = donor
+                        _record_gap_method(df, timestamp, timestamp, f"{prefix}_WEEK_BEFORE", "SYSTEM")
+                        success = True
+
+            if not success:
+                df.loc[timestamp, cols] = clean_mean
+                _record_gap_method(df, timestamp, timestamp, f"{prefix}_GLOBAL_MEAN_FALLBACK", "SYSTEM")
+
+    # ========================================================
+    # PHASE 3: CATEGORICAL IMPUTATION EXECUTION
+    # ========================================================
+
+    # 3A. Generation Patching
+    if "Total Generation" in df.columns:
+        gen_cols = [c for c in num_df.columns if c not in ["Demand", "Total Load", "Storage Charge", "Actual Load",
+                                                           "Net Export"] and "net_export" not in c]
+        apply_patch(df["Total Generation"] == 0, gen_cols, "GEN_ZERO")
+
+    # 3B. Demand Patching
+    target_col = next((col for col in ["Demand", "Total Load"] if col in df.columns), None)
+    if target_col:
+        dem_cols = [c for c in num_df.columns if c in ["Demand", "Total Load", "Storage Charge"]]
+        apply_patch(df[target_col] == 0, dem_cols, "LOAD_ZERO")
+
+    # 3C. Flow Patching
+    if "Total Generation" not in df.columns and "Total Load" not in df.columns:
+        allowed_islands = getattr(config, 'valid_zero_zones', [])
+
+        if bz not in allowed_islands:
+            # Scenario A: Commercial Matrix
+            if flow_type == "commercial":
+                flow_mask = (num_df[base_flow_cols] == 0).all(axis=1)
+                apply_patch(flow_mask, base_flow_cols, "COMM_FLOW_SYSTEM_ZERO")
+
+            # Scenario B: Physical Matrix
+            elif flow_type == "physical":
+                # Step 1: System-wide Nodal Checks
+                row_zero_mask = (num_df[base_flow_cols] == 0).all(axis=1)
+                if row_zero_mask.any():
+                    apply_patch(row_zero_mask, base_flow_cols, "PHYS_FLOW_SYSTEM_ZERO")
+
+                # Step 2: Isolated Bilateral Checks
+                checked_cols = set()
+                for col in base_flow_cols:
+                    if col in checked_cols: continue
+
+                    parts = col.split('_')
+                    if len(parts) >= 2:
+                        target = col.replace(f"{bz}_", "") if col.startswith(f"{bz}_") else col.replace(f"_{bz}", "")
+                        col_out, col_in = f"{bz}_{target}", f"{target}_{bz}"
+                        border_key = "_".join(sorted([bz, target]))
+
+                        if col_out in df.columns and col_in in df.columns:
+                            checked_cols.update([col_out, col_in])
+
+                            if border_key in getattr(config, 'hvdc_borders', []): continue
+
+                            bilateral_zero_mask = (df[col_out] == 0) & (df[col_in] == 0)
+                            if bilateral_zero_mask.any():
+                                apply_patch(bilateral_zero_mask, [col_out, col_in], f"PHYS_BILATERAL_ZERO_[{target}]")
+
+    # ========================================================
+    # PHASE 4: DETERMINISTIC RECALCULATION
+    # ========================================================
+    # Reconstruct structural net exports following base-layer imputation to enforce topological symmetry
+    net_export_cols = [c for c in df.columns if c.endswith("_net_export")]
+    if net_export_cols:
+        for net_col in net_export_cols:
+            col_out = net_col.replace("_net_export", "")
+            target = col_out.replace(f"{bz}_", "") if col_out.startswith(f"{bz}_") else col_out.replace(f"_{bz}", "")
+            col_in = f"{target}_{bz}"
+
+            out_val = df[col_out] if col_out in df.columns else 0.0
+            in_val = df[col_in] if col_in in df.columns else 0.0
+
+            df[net_col] = out_val - in_val
+
+        df["Net Export"] = df[net_export_cols].sum(axis=1)
 
     return df

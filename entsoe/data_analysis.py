@@ -13,6 +13,10 @@ from config import PipelineConfig
 import pandas as pd
 from postgres_utils import df_to_timescale
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 # Save original method
 _original_to_csv = pd.DataFrame.to_csv
 
@@ -308,7 +312,7 @@ def perform_aggregated_flow_tracing(config: PipelineConfig, gen_dfs=None, phys_f
     Traces flows using Physical Flow Matrix Inversion (Q = A^-1 * Pin).
     Assumes perfect mixing within zones (Copper Plate).
     """
-    print("Starting Aggregated Coupling Flow Tracing...")
+    logger.info("Starting Aggregated Coupling Flow Tracing...")
     gen_dfs, _, phys_flow_dfs = _load_if_missing(config, gen_dfs, phys_dfs=phys_flow_dfs)
     
     # Resample to ensure alignment
