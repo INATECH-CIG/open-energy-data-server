@@ -45,7 +45,7 @@ class OedsDataIO:
         if bidding_zone and raw_spec.get("table"):
             base_table = raw_spec.get("table")
             
-            # Since all templates are now formatted as "BE_table_name_suffix", 
+            # Since all templates are now formatted as "BZ_table_name_suffix", 
             # we unconditionally split on the first underscore.
             parts = base_table.split("_", 1)  
             if len(parts) == 2:
