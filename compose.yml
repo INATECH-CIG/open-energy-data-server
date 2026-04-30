@@ -160,6 +160,27 @@ services:
     command: prefect worker start --pool local-pool
     restart: on-failure
 
+  streamlit-app:
+    build:
+      context: ./streamlit-app
+      dockerfile: Dockerfile
+    container_name: oeds-streamlit
+    restart: unless-stopped
+    depends_on:
+      - open-data-17
+    volumes:                                
+      - ./streamlit-app:/app                
+    environment:
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      TOPOLOGY_CONFIG_PATH: /app/config/topology.yaml
+      LOG_LEVEL: INFO
+    ports:
+      - "${STREAMLIT_PORT:-8501}:8501"
+
 volumes:
   postgres_data:
   redis_data:
