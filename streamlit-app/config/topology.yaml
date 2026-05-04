@@ -52,33 +52,3 @@ neighbours:
   IT_CALA: [IT_SICI, IT_SUD]
   MT: [IT_SICI]
   HR: [BA, HU, RS, SI]
-
-db_mapping:
-  defaults:
-    timestamp_column: index
-    zone_column: bidding_zone
-  tables:
-    processed_commercial_flows:
-      table: BZ_comm_flow_total_bidding_zones
-      timestamp_column: index
-      zone_column: bidding_zone
-      
-    processed_commercial_flows_da:
-      table: BZ_comm_flow_dayahead_bidding_zones
-      timestamp_column: index
-      zone_column: bidding_zone
-      
-    pool_commercial_net_pos_bz:
-      table: BZ_import_flow_tracing_agg_coupling_per_bidding_zone
-      timestamp_column: index
-      zone_column: bidding_zone
-      
-    processed_physical_flows:
-      table: BZ_physical_flow_data_bidding_zones
-      timestamp_column: index
-      zone_column: bidding_zone
-      
-    processed_generation:
-      table: BZ_generation_demand
-      timestamp_column: index
-      zone_column: bidding_zone
