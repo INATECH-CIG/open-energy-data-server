@@ -64,10 +64,6 @@ For more information, check out `oeds -h`.
 If you want to use the ECMWF crawler you need to create an account at [copernicus](https://cds.climate.copernicus.eu) to get an API key which allows you to query the API of copernicus.
 Follow the [instructions](https://cds.climate.copernicus.eu/api-how-to) of copernicus for that.
 
-## TimeScaleDB
-
-The used database technology for the database server is [TimescaleDB](https://timescale.com/) which is an extension for PostgreSQL (just like PostGIS but for timeseries databases).
-
 ## Prefect
 
 This project uses [prefect](https://docs.prefect.io/v3/get-started) for orchestrating all the workflows. 
@@ -92,6 +88,14 @@ The group defines which data can be seen by an user.
 To create a new group, click on `Groups` (left side of the `People` menu) and create a new group. Click on the new group to add users. 
 
 To manage permissions, click on `Permissions` , no select what the user may see (always choose granular to step down a level in granularity).
+
+### Change column/table names an descriptions
+
+Metabase changes column and table names to be 'more human readable'. This also removes the country codes in Caps and makes them mixed case. Unfortunately there is no way to turn this off completely, but you give new display names for each column (which don't change anything in the real database). To do this, login as an Admin and click `⚙`️ > `Admin setting` > `Table Metadata` > `opendata` > `<corresponding schema>` > `<corresponding table>` . Here you can change the displayed name of the table and each column/field and also add descriptions to it. 
+
+## TimeScaleDB
+
+The used database technology for the database server is [TimescaleDB](https://timescale.com/) which is an extension for PostgreSQL (just like PostGIS but for timeseries databases).
 
 ### What is a time-series database?
 Normal SQL tables can get quite slow if millions of entries are stored in them.
