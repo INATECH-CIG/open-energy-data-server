@@ -5,7 +5,6 @@
 services:
   open-data-17:
     image: timescale/timescaledb-ha:pg17-oss
-    container_name: open-data-17
     restart: unless-stopped
     shm_size: 32g
     command: postgres -c 'max_connections=6000' -c 'timescaledb.max_background_workers=32' -c 'timescaledb.telemetry_level=off'
@@ -17,14 +16,12 @@ services:
     volumes:
       - ./data/open-data-ha:/var/lib/postgresql
       - ./data/init.sh:/docker-entrypoint-initdb.d/init.sh
-
     ports:
-      - "6432:5432"
+      - "${DB_PORT}:5432"
 
   pgadmin:
     user: root
     image: dpage/pgadmin4:latest
-    container_name: pgadmin4
     restart: unless-stopped
     environment:
       PGADMIN_DEFAULT_EMAIL: ${PG_MAIL}
@@ -36,16 +33,15 @@ services:
       - ./data/pgadmin:/var/lib/pgadmin
       - ./data/provisioning/pgadmin/servers.json:/pgadmin4/servers.json
     ports:
-      - "8080:80"
+      - "${PGADMIN_PORT}:80"
     depends_on:
       - open-data-17
 
   open-postgrest:
     image: postgrest/postgrest:latest
-    container_name: postgrest
     restart: unless-stopped
     ports:
-      - "3001:3000"
+      - "${POSTGREST_PORT}:3000"
     environment:
       PGRST_DB_URI: postgres://readonly:${READONLY_PW}@open-data-17:5432/${DB_NAME}
       PGRST_DB_PRE_CONFIG: postgrest.pre_config
@@ -56,13 +52,12 @@ services:
 
   grafana:
     image: grafana/grafana-oss:latest
-    container_name: oeds-grafana
     restart: unless-stopped
     user: "104"
     depends_on:
       - open-data-17
     ports:
-      - 3006:3000
+      - "${GRAFANA_PORT}:3000"
     environment:
       GF_SECURITY_ALLOW_EMBEDDING: "true"
       GF_AUTH_ANONYMOUS_ENABLED: "true"
@@ -77,7 +72,6 @@ services:
 
   postgres:
     image: postgres:14
-    container_name: prefect-postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${PREFECT_POSTGRES_USER}
@@ -93,7 +87,6 @@ services:
 
   redis:
     image: redis:7
-    container_name: redis
     restart: unless-stopped
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
@@ -107,7 +100,6 @@ services:
 
   prefect-server:
     image: prefecthq/prefect:3-latest
-    container_name: prefect-server
     restart: unless-stopped
     depends_on:
       postgres:
@@ -126,7 +118,7 @@ services:
       PREFECT_REDIS_MESSAGING_DB: 0
     command: prefect server start --no-services
     ports:
-      - "4200:4200"
+      - "${PREFECT_PORT}:4200"
     healthcheck:
       test: [ "CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:4200/api/health', timeout=1)" ]
       interval: 30s
@@ -136,7 +128,6 @@ services:
 
   prefect-services:
     image: prefecthq/prefect:3-latest
-    container_name: prefect-services
     restart: unless-stopped
     depends_on:
       prefect-server:
@@ -154,7 +145,6 @@ services:
 
   prefect-worker:
     image: prefecthq/prefect:3-latest
-    container_name: prefect-worker
     restart: unless-stopped
     depends_on:
       prefect-server:
@@ -162,18 +152,17 @@ services:
     environment:
       PREFECT_API_URL: http://prefect-server:4200/api
     volumes:
-       - /root/open-energy-data-server:/root/open-energy-data-server
+      - ${WORKER_CODE_PATH}:/root/open-energy-data-server
     command: prefect worker start --pool local-pool
 
   metabase:
     image: metabase/metabase:latest
-    container_name: metabase
     restart: unless-stopped
     hostname: metabase
     volumes:
       - ./data/metabase:/metabase-data
     ports:
-      - 3000:3000
+      - "${METABASE_PORT}:3000"
     environment:
       MB_DB_TYPE: postgres
       MB_DB_DBNAME: metabaseappdb
@@ -191,7 +180,6 @@ services:
 
   postgres-metabase:
     image: postgres:16
-    container_name: postgres
     restart: unless-stopped
     hostname: postgres
     environment:
