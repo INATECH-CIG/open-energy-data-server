@@ -150,7 +150,7 @@ services:
       PREFECT_REDIS_MESSAGING_PORT: 6379
       PREFECT_API_URL: http://88.214.56.50:4200/api
       PREFECT_REDIS_MESSAGING_DB: 0
-    command: prefect server services start
+      PREFECT_SERVER_API_AUTH_STRING: "${PREFECT_USER}:${PREFECT_PASSWORD}"
 
   prefect-worker:
     image: prefecthq/prefect:3-latest
