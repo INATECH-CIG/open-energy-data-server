@@ -16,7 +16,7 @@ services:
       - PGDATA=/var/lib/postgresql/data
     volumes:
       - ./data/open-data-ha:/var/lib/postgresql
-      - ./data/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./data/init.sh:/docker-entrypoint-initdb.d/init.sh
 
     ports:
       - "6432:5432"
