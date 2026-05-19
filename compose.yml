@@ -6,7 +6,7 @@ services:
   open-data-17:
     image: timescale/timescaledb-ha:pg17-oss
     container_name: open-data-17
-    restart: always
+    restart: unless-stopped
     shm_size: 32g
     command: postgres -c 'max_connections=6000' -c 'timescaledb.max_background_workers=32' -c 'timescaledb.telemetry_level=off'
     environment:
@@ -25,7 +25,7 @@ services:
     user: root
     image: dpage/pgadmin4:latest
     container_name: pgadmin4
-    restart: always
+    restart: unless-stopped
     environment:
       PGADMIN_DEFAULT_EMAIL: ${PG_MAIL}
       PGADMIN_DEFAULT_PASSWORD: ${PG_PW}
@@ -43,6 +43,7 @@ services:
   open-postgrest:
     image: postgrest/postgrest:latest
     container_name: postgrest
+    restart: unless-stopped
     ports:
       - "3001:3000"
     environment:
@@ -56,6 +57,7 @@ services:
   grafana:
     image: grafana/grafana-oss:latest
     container_name: oeds-grafana
+    restart: unless-stopped
     user: "104"
     depends_on:
       - open-data-17
@@ -72,11 +74,11 @@ services:
       - ./data/provisioning/grafana/datasources:/etc/grafana/provisioning/datasources
       - ./data/provisioning/grafana/dashboardproviders:/etc/grafana/provisioning/dashboards
       - ./data/provisioning/grafana/dashboards:/var/lib/grafana/dashboards
-    restart: always
 
   postgres:
     image: postgres:14
     container_name: prefect-postgres
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${PREFECT_POSTGRES_USER}
       POSTGRES_PASSWORD: ${PREFECT_POSTGRES_PASSWORD}
@@ -92,6 +94,7 @@ services:
   redis:
     image: redis:7
     container_name: redis
+    restart: unless-stopped
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
     volumes:
@@ -105,6 +108,7 @@ services:
   prefect-server:
     image: prefecthq/prefect:3-latest
     container_name: prefect-server
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
@@ -133,6 +137,7 @@ services:
   prefect-services:
     image: prefecthq/prefect:3-latest
     container_name: prefect-services
+    restart: unless-stopped
     depends_on:
       prefect-server:
         condition: service_healthy
@@ -150,6 +155,7 @@ services:
   prefect-worker:
     image: prefecthq/prefect:3-latest
     container_name: prefect-worker
+    restart: unless-stopped
     depends_on:
       prefect-server:
         condition: service_healthy
@@ -158,11 +164,11 @@ services:
     volumes:
        - /root/open-energy-data-server:/root/open-energy-data-server
     command: prefect worker start --pool local-pool
-    restart: on-failure
 
   metabase:
     image: metabase/metabase:latest
     container_name: metabase
+    restart: unless-stopped
     hostname: metabase
     volumes:
       - ./data/metabase:/metabase-data
@@ -182,9 +188,11 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
+
   postgres-metabase:
     image: postgres:16
     container_name: postgres
+    restart: unless-stopped
     hostname: postgres
     environment:
       POSTGRES_USER: metabase
