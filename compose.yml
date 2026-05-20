@@ -151,8 +151,6 @@ services:
         condition: service_healthy
     environment:
       PREFECT_API_URL: http://prefect-server:4200/api
-    volumes:
-      - ${WORKER_CODE_PATH}:/root/open-energy-data-server
     command: prefect worker start --pool local-pool
 
   metabase:
