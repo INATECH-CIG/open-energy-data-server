@@ -124,7 +124,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s
+      start_period: 600s
 
   prefect-services:
     image: prefecthq/prefect:3-latest
@@ -142,6 +142,7 @@ services:
       PREFECT_API_URL: ${PREFECT_API_URL}
       PREFECT_REDIS_MESSAGING_DB: 0
       PREFECT_SERVER_API_AUTH_STRING: "${PREFECT_USER}:${PREFECT_PASSWORD}"
+    command: prefect server services start
 
   prefect-worker:
     image: prefecthq/prefect:3-latest
@@ -191,4 +192,3 @@ services:
 
 volumes:
   postgres_data:
-  redis_data:
