@@ -166,7 +166,7 @@ services:
       MB_DB_DBNAME: metabaseappdb
       MB_DB_PORT: 5432
       MB_DB_USER: metabase
-      MB_DB_PASS: ${METABASE_PW}
+      MB_DB_PASS: ${POSTGRES_METABASE_PW}
       MB_DB_HOST: postgres-metabase
       JAVA_OPTS: "-Xms1g -Xmx2g"
       MB_SAMPLE_DATABASE: "false"
@@ -175,11 +175,15 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
+    depends_on:
+      - postgres-metabase
 
   postgres-metabase:
     image: postgres:16
     restart: unless-stopped
     hostname: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
     environment:
       POSTGRES_USER: metabase
       POSTGRES_DB: metabaseappdb
