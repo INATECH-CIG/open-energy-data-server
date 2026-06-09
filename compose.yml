@@ -83,7 +83,7 @@ services:
       POSTGRES_PASSWORD: ${PREFECT_POSTGRES_PASSWORD}
       POSTGRES_DB: ${PREFECT_POSTGRES_DB}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - prefect_postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U prefect" ]
       interval: 5s
@@ -195,12 +195,12 @@ services:
     restart: unless-stopped
     hostname: postgres
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - metabase_postgres_data:/var/lib/postgresql/data
     environment:
       POSTGRES_USER: metabase
       POSTGRES_DB: metabaseappdb
       POSTGRES_PASSWORD: ${POSTGRES_METABASE_PW}
-
 volumes:
-  postgres_data:
+  prefect_postgres_data:
+  metabase_postgres_data:
   redis_data:
