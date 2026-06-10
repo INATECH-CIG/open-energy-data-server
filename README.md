@@ -68,8 +68,34 @@ Follow the [instructions](https://cds.climate.copernicus.eu/api-how-to) of coper
 
 This project uses [prefect](https://docs.prefect.io/v3/get-started) for orchestrating all the workflows. 
 Prefect can automatically run python scripts e.g. for crawling, processing and analysing data. 
-To add a script, you have to deploy it. See [here](https://docs.prefect.io/v3/how-to-guides/deployments/create-deployments) for more information about deploying. 
 An overview dashboard of your flows and runs is shown at http://<ip>:4200/runs).
+
+### Deploying flows
+
+To add a script and automate it with prefect, you have to deploy it.
+There are many ways to deploy your script so that it gets executed by prefect. We suggest the following workflow which can and should be done from your local machine: 
+
+- Make sure the script you want to automate has a method which is decorated with `@flow` and is connected to a github repo. 
+- Make sure you have installed the prefect CLI tool. 
+- In the root directory of your repo, create the file `prefect.yaml` with the following structure: 
+```
+deployments:
+  - name: <name of deployment>
+    entrypoint: <path to your script from repo root:flow method>
+    work_pool:
+      name: local-pool
+    pull:
+      - prefect.deployments.steps.git_clone:
+          repository: <repo of your code>
+          branch: <the branch to pull from(usually main)>
+  ```
+- On your local machine, run `prefect config set PREFECT_API_URL=http://<server-ip>:<prefect api port (usually 4200)>/api `
+- Run `prefect work-pool ls` and check if the `local-pool` id is the same as when you run it on the oeds data server.
+- Run `prefect deploy`. You will be able to initiate schedules.
+- Verify that the deployment and the runs are present under `http://<server-ip>:<prefect api port (usually 4200)>`
+
+See [here](https://docs.prefect.io/v3/how-to-guides/deployments/create-deployments) for more information about deploying. 
+
 
 ## Metabase
 
