@@ -96,7 +96,7 @@ deployments:
 
 - On your local machine, run `prefect config set PREFECT_API_URL=http://<server-ip>:<prefect api port (usually 4200)>/api `
 - Run `prefect work-pool ls` and check if the `local-pool` id is the same as when you run it on the oeds data server.
-- Run `prefect deploy`. You will be able to initiate schedules.
+- Run `prefect deploy -n <deployment name>`. You will be able to initiate schedules.
 - Verify that the deployment and the runs are present under `http://<server-ip>:<prefect api port (usually 4200)>`
 
 See [here](https://docs.prefect.io/v3/how-to-guides/deployments/create-deployments) for more information about deploying. 
