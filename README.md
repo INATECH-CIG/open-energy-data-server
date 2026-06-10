@@ -86,9 +86,14 @@ deployments:
       name: local-pool
     pull:
       - prefect.deployments.steps.git_clone:
+          id: clone-step
           repository: <repo of your code>
           branch: <the branch to pull from(usually main)>
+      - prefect.deployments.steps.pip_install_requirements:
+      directory: "{{ clone-step.directory }}"
+      requirements_file: requirements.txt
   ```
+
 - On your local machine, run `prefect config set PREFECT_API_URL=http://<server-ip>:<prefect api port (usually 4200)>/api `
 - Run `prefect work-pool ls` and check if the `local-pool` id is the same as when you run it on the oeds data server.
 - Run `prefect deploy`. You will be able to initiate schedules.
