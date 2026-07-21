@@ -50,26 +50,6 @@ services:
     depends_on:
       - open-data-17
 
-  grafana:
-    image: grafana/grafana-oss:latest
-    restart: unless-stopped
-    user: "104"
-    depends_on:
-      - open-data-17
-    ports:
-      - "${GRAFANA_PORT}:3000"
-    environment:
-      GF_SECURITY_ALLOW_EMBEDDING: "true"
-      GF_AUTH_ANONYMOUS_ENABLED: "true"
-      GF_INSTALL_PLUGINS: "marcusolsson-dynamictext-panel,orchestracities-map-panel"
-      GF_SECURITY_ADMIN_USER: opendata
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PW}
-      GF_LOG_FILTERS: rendering:debug
-    volumes:
-      - ./data/provisioning/grafana/datasources:/etc/grafana/provisioning/datasources
-      - ./data/provisioning/grafana/dashboardproviders:/etc/grafana/provisioning/dashboards
-      - ./data/provisioning/grafana/dashboards:/var/lib/grafana/dashboards
-
   postgres:
     image: postgres:14
     restart: unless-stopped
