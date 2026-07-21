@@ -132,6 +132,9 @@ services:
         condition: service_healthy
     environment:
       PREFECT_API_URL: http://prefect-server:4200/api
+      ENTSOE_API_KEY: ${ENTSOE_API_KEY}
+      PREFECT_LOGGING_EXTRA_LOGGERS: exchange_analysis
+
     command: prefect worker start --pool local-pool
 
   metabase:
