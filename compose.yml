@@ -5,7 +5,6 @@
 services:
   open-data-17:
     image: timescale/timescaledb-ha:pg17-oss
-    container_name: "open-data-17${CONTAINER_NAME_SUFFIX}"
     restart: unless-stopped
     shm_size: 32g
     command: postgres -c 'max_connections=6000' -c 'timescaledb.max_background_workers=32' -c 'timescaledb.telemetry_level=off'
@@ -23,7 +22,6 @@ services:
   pgadmin:
     user: root
     image: dpage/pgadmin4:latest
-    container_name: "pgadmin4${CONTAINER_NAME_SUFFIX}"
     restart: unless-stopped
     environment:
       PGADMIN_DEFAULT_EMAIL: ${PG_MAIL}
@@ -41,7 +39,6 @@ services:
 
   open-postgrest:
     image: postgrest/postgrest:latest
-    container_name: "postgrest${CONTAINER_NAME_SUFFIX}"
     restart: unless-stopped
     ports:
       - "${POSTGREST_PORT}:3000"
@@ -55,7 +52,6 @@ services:
 
   grafana:
     image: grafana/grafana-oss:latest
-    container_name: "oeds-grafana${CONTAINER_NAME_SUFFIX}"
     restart: unless-stopped
     user: "104"
     depends_on:
@@ -76,7 +72,6 @@ services:
 
   postgres:
     image: postgres:14
-    container_name: "prefect-postgres${CONTAINER_NAME_SUFFIX}"
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${PREFECT_POSTGRES_USER}
@@ -92,7 +87,6 @@ services:
 
   redis:
     image: redis:7
-    container_name: "redis${CONTAINER_NAME_SUFFIX}"
     restart: unless-stopped
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
@@ -106,7 +100,6 @@ services:
 
   prefect-server:
     image: prefecthq/prefect:3-latest
-    container_name: "prefect-server${CONTAINER_NAME_SUFFIX}"
     restart: unless-stopped
     depends_on:
       postgres:
@@ -135,7 +128,6 @@ services:
 
   prefect-services:
     image: prefecthq/prefect:3-latest
-    container_name: "prefect-services${CONTAINER_NAME_SUFFIX}"
     restart: unless-stopped
     depends_on:
       prefect-server:
@@ -154,7 +146,6 @@ services:
 
   prefect-worker:
     image: prefecthq/prefect:3-latest
-    container_name: "prefect-worker${CONTAINER_NAME_SUFFIX}"
     restart: unless-stopped
     depends_on:
       prefect-server:
@@ -165,7 +156,6 @@ services:
 
   metabase:
     image: metabase/metabase:latest
-    container_name: "metabase${CONTAINER_NAME_SUFFIX}"
     restart: unless-stopped
     hostname: metabase
     volumes:
@@ -191,7 +181,6 @@ services:
 
   postgres-metabase:
     image: postgres:16
-    container_name: "postgres${CONTAINER_NAME_SUFFIX}"
     restart: unless-stopped
     hostname: postgres
     volumes:
