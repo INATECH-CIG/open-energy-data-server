@@ -33,18 +33,7 @@ Start the `compose.yml` with `docker compose up -d`.
 
 Then you have a running TimescaleDB server listening on postgresql default port `5432`.
 
-![Visualization of OEDS Usage Workflow](docs/source/media/oeds-workflow.png)
-
-As seen in the above workflow outline, the data is inserted by scripts which retrieve the data from a source API.
-This is the core part, afterwards, everything is basically usable.
-
-You can install all python dependencies:
-
-`pip install -r requirements.txt`
-
-Furthermore, you need to copy the `config.example.yml` to `config.yml` and adjust the credentials for access.
-
-And finally run the main crawling script `python main.py` to download all available sources into the database.
+Now, deploy your scripts with prefect and connect the database to metabase. Check out the prefect and metabase sections in this file for more instructions. 
 
 ## Prefect
 
