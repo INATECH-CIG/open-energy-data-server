@@ -5,7 +5,6 @@
 services:
   open-data-17:
     image: timescale/timescaledb-ha:pg17-oss
-    container_name: "open-data-17${CONTAINER_NAME_SUFFIX}"
     restart: unless-stopped
     shm_size: 32g
     command: postgres -c 'max_connections=6000' -c 'timescaledb.max_background_workers=32' -c 'timescaledb.telemetry_level=off'
@@ -23,7 +22,6 @@ services:
   pgadmin:
     user: root
     image: dpage/pgadmin4:latest
-    container_name: "pgadmin4${CONTAINER_NAME_SUFFIX}"
     restart: unless-stopped
     environment:
       PGADMIN_DEFAULT_EMAIL: ${PG_MAIL}
@@ -41,7 +39,6 @@ services:
 
   open-postgrest:
     image: postgrest/postgrest:latest
-    container_name: "postgrest${CONTAINER_NAME_SUFFIX}"
     restart: unless-stopped
     ports:
       - "${POSTGREST_PORT}:3000"
@@ -53,30 +50,8 @@ services:
     depends_on:
       - open-data-17
 
-  grafana:
-    image: grafana/grafana-oss:latest
-    container_name: "oeds-grafana${CONTAINER_NAME_SUFFIX}"
-    restart: unless-stopped
-    user: "104"
-    depends_on:
-      - open-data-17
-    ports:
-      - "${GRAFANA_PORT}:3000"
-    environment:
-      GF_SECURITY_ALLOW_EMBEDDING: "true"
-      GF_AUTH_ANONYMOUS_ENABLED: "true"
-      GF_INSTALL_PLUGINS: "marcusolsson-dynamictext-panel,orchestracities-map-panel"
-      GF_SECURITY_ADMIN_USER: opendata
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PW}
-      GF_LOG_FILTERS: rendering:debug
-    volumes:
-      - ./data/provisioning/grafana/datasources:/etc/grafana/provisioning/datasources
-      - ./data/provisioning/grafana/dashboardproviders:/etc/grafana/provisioning/dashboards
-      - ./data/provisioning/grafana/dashboards:/var/lib/grafana/dashboards
-
   postgres:
     image: postgres:14
-    container_name: "prefect-postgres${CONTAINER_NAME_SUFFIX}"
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${PREFECT_POSTGRES_USER}
@@ -92,7 +67,6 @@ services:
 
   redis:
     image: redis:7
-    container_name: "redis${CONTAINER_NAME_SUFFIX}"
     restart: unless-stopped
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
@@ -106,7 +80,6 @@ services:
 
   prefect-server:
     image: prefecthq/prefect:3-latest
-    container_name: "prefect-server${CONTAINER_NAME_SUFFIX}"
     restart: unless-stopped
     depends_on:
       postgres:
@@ -135,7 +108,6 @@ services:
 
   prefect-services:
     image: prefecthq/prefect:3-latest
-    container_name: "prefect-services${CONTAINER_NAME_SUFFIX}"
     restart: unless-stopped
     depends_on:
       prefect-server:
@@ -154,18 +126,23 @@ services:
 
   prefect-worker:
     image: prefecthq/prefect:3-latest
-    container_name: "prefect-worker${CONTAINER_NAME_SUFFIX}"
     restart: unless-stopped
     depends_on:
       prefect-server:
         condition: service_healthy
     environment:
       PREFECT_API_URL: http://prefect-server:4200/api
+      ENTSOE_API_KEY: ${ENTSOE_API_KEY}
+      PREFECT_LOGGING_EXTRA_LOGGERS: exchange_analysis
+      DB_PORT: ${DB_PORT}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+
     command: prefect worker start --pool local-pool
 
   metabase:
     image: metabase/metabase:latest
-    container_name: "metabase${CONTAINER_NAME_SUFFIX}"
     restart: unless-stopped
     hostname: metabase
     volumes:
@@ -191,7 +168,6 @@ services:
 
   postgres-metabase:
     image: postgres:16
-    container_name: "postgres${CONTAINER_NAME_SUFFIX}"
     restart: unless-stopped
     hostname: postgres
     volumes:
