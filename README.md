@@ -20,7 +20,7 @@ For an interactive Documentation, please visit the [Read the Docs Page](https://
 ## Getting started
 
 To set up your institutes new open-data server, you can [install docker](https://docs.docker.com/engine/install/) or [podman](https://podman.io/).
-Then do `cp .env_template .env` and `nano .env` to set credentials. 
+Then do `cp .env_template .env` and `nano .env` to set credentials, project name, prefect loggers, and ports.
 
 We also need to create the directory for postgres data storage and give postgres permission, which is done by  
 `mkdir -p ./data/open-data-ha`  
