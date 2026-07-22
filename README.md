@@ -78,6 +78,7 @@ See [here](https://docs.prefect.io/v3/how-to-guides/deployments/create-deploymen
 To access, browse and download the data, we provide an metabase instance. Once the metabase container started,
 the admin should go to http://<ip>:3000 to claim the admin account. After this you can connect the database 
 with metabase using the connection string `postgresql://readonly:<READONLY_PW>@open-data-17:<DB_PORT>/opendata` .
+On the bottom, you can select `Schemas: all except` and paste `_timescaledb_catalog,_timescaledb_config,_timescaledb_internal,timescaledb_experimental,timescaledb_information,public`
 You can verify the connection by clicking on `Data` > `Databases` > `opendata` > `public` . Once you have uploaded data into the db, all tables
 should appear here. you can click on any table, browse and download the data (bottom right corner).
 
