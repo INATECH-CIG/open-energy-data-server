@@ -135,6 +135,9 @@ services:
       ENTSOE_API_KEY: ${ENTSOE_API_KEY}
       PREFECT_LOGGING_EXTRA_LOGGERS: exchange_analysis
       DB_PORT: ${DB_PORT}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
 
     command: prefect worker start --pool local-pool
 
