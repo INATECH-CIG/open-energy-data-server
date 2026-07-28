@@ -165,6 +165,9 @@ services:
       retries: 5
     depends_on:
       - postgres-metabase
+    networks:
+      - default
+      - proxy
 
   postgres-metabase:
     image: postgres:16
@@ -180,3 +183,8 @@ volumes:
   prefect_postgres_data:
   metabase_postgres_data:
   redis_data:
+
+networks:
+  proxy:
+    external: true
+    name: proxy
