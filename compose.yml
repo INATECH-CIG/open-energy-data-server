@@ -149,6 +149,13 @@ services:
       - ./data/metabase:/metabase-data
     ports:
       - "${METABASE_PORT}:3000"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.metabase.rule=Host(`metabase.open-energy-data.vm.uni-freiburg.de`)"
+      - "traefik.http.routers.metabase.entrypoints=websecure"
+      - "traefik.http.routers.metabase.tls=true"
+      - "traefik.http.routers.metabase.tls.certresolver=letsencrypt"
+      - "traefik.http.services.metabase.loadbalancer.server.port=3000"
     environment:
       MB_DB_TYPE: postgres
       MB_DB_DBNAME: metabaseappdb
