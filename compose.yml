@@ -151,7 +151,7 @@ services:
       - "${METABASE_PORT}:3000"
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.metabase.rule=Host(`metabase.open-energy-data.vm.uni-freiburg.de`)"
+      - "traefik.http.routers.metabase.rule=Host(`${METABASE_DOMAIN}`)"      
       - "traefik.http.routers.metabase.entrypoints=websecure"
       - "traefik.http.routers.metabase.tls=true"
       - "traefik.http.routers.metabase.tls.certresolver=letsencrypt"
