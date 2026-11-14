@@ -176,6 +176,13 @@ services:
       POSTGRES_USER: metabase
       POSTGRES_DB: metabaseappdb
       POSTGRES_PASSWORD: ${POSTGRES_METABASE_PW}
+  flow-tracing-visualization:
+    image: git.to-v.de/tobi/flow-dashboard:latest
+    env_file:
+      - .env
+    ports:
+      - "${FT_VIS_PORT}:3000"
+
 volumes:
   prefect_postgres_data:
   metabase_postgres_data:
