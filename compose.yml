@@ -186,6 +186,8 @@ services:
       POSTGRES_USER: metabase
       POSTGRES_DB: metabaseappdb
       POSTGRES_PASSWORD: ${POSTGRES_METABASE_PW}
+
+
   flow-tracing-visualization:
     image: git.to-v.de/tobi/flow-dashboard:latest
     restart: unless-stopped
@@ -193,6 +195,16 @@ services:
       - .env
     ports:
       - "${FT_VIS_PORT}:3000"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.flowtracing-${COMPOSE_PROJECT_NAME}.rule=Host(`${FT_VIS_DOMAIN}`)"
+      - "traefik.http.routers.flowtracing-${COMPOSE_PROJECT_NAME}.entrypoints=websecure"
+      - "traefik.http.routers.flowtracing-${COMPOSE_PROJECT_NAME}.tls=true"
+      - "traefik.http.routers.flowtracing-${COMPOSE_PROJECT_NAME}.tls.certresolver=letsencrypt"
+      - "traefik.http.services.flowtracing-${COMPOSE_PROJECT_NAME}.loadbalancer.server.port=3000"
+    networks:
+      - default
+      - proxy
 
 volumes:
   prefect_postgres_data:
