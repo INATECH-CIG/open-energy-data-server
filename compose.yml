@@ -193,8 +193,6 @@ services:
     restart: unless-stopped
     env_file:
       - .env
-    ports:
-      - "${FT_VIS_PORT}:3000"
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.flowtracing-${COMPOSE_PROJECT_NAME}.rule=Host(`${FT_VIS_DOMAIN}`)"
