@@ -149,6 +149,13 @@ services:
       - ./data/metabase:/metabase-data
     ports:
       - "${METABASE_PORT}:3000"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.metabase-${COMPOSE_PROJECT_NAME}.rule=Host(`${METABASE_DOMAIN}`)"
+      - "traefik.http.routers.metabase-${COMPOSE_PROJECT_NAME}.entrypoints=websecure"
+      - "traefik.http.routers.metabase-${COMPOSE_PROJECT_NAME}.tls=true"
+      - "traefik.http.routers.metabase-${COMPOSE_PROJECT_NAME}.tls.certresolver=letsencrypt"
+      - "traefik.http.services.metabase-${COMPOSE_PROJECT_NAME}.loadbalancer.server.port=3000"
     environment:
       MB_DB_TYPE: postgres
       MB_DB_DBNAME: metabaseappdb
@@ -165,6 +172,9 @@ services:
       retries: 5
     depends_on:
       - postgres-metabase
+    networks:
+      - default
+      - proxy
 
   postgres-metabase:
     image: postgres:16
@@ -188,3 +198,8 @@ volumes:
   prefect_postgres_data:
   metabase_postgres_data:
   redis_data:
+
+networks:
+  proxy:
+    external: true
+    name: proxy
