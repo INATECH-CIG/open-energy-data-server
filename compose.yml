@@ -178,6 +178,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_METABASE_PW}
   flow-tracing-visualization:
     image: git.to-v.de/tobi/flow-dashboard:latest
+    restart: unless-stopped
     env_file:
       - .env
     ports:
