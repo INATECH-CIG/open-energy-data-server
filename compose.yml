@@ -193,6 +193,12 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+        POSTGRES_USER: ${DB_USER}
+        POSTGRES_PASSWORD: ${DB_PASSWORD}
+        POSTGRES_DB: ${DB_NAME}
+        DB_HOST: open-data-17
+        DB_PORT: 5432
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.flowtracing-${COMPOSE_PROJECT_NAME}.rule=Host(`${FT_VIS_DOMAIN}`)"
