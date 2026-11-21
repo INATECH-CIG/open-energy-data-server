@@ -210,6 +210,21 @@ services:
       - default
       - proxy
 
+  co2map-frontend:
+    build:
+      context: ./co2map-frontend
+      dockerfile: Dockerfile.co2map
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.co2map-${COMPOSE_PROJECT_NAME}.rule=Host(`${CO2MAP_DOMAIN}`)"
+      - "traefik.http.routers.co2map-${COMPOSE_PROJECT_NAME}.entrypoints=websecure"
+      - "traefik.http.routers.co2map-${COMPOSE_PROJECT_NAME}.tls=true"
+      - "traefik.http.routers.co2map-${COMPOSE_PROJECT_NAME}.tls.certresolver=letsencrypt"
+      - "traefik.http.services.co2map-${COMPOSE_PROJECT_NAME}.loadbalancer.server.port=80"
+    networks:
+      - proxy
+
 volumes:
   prefect_postgres_data:
   metabase_postgres_data:
