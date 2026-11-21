@@ -212,7 +212,7 @@ services:
 
   co2map-frontend:
     build:
-      context: ./co2map-frontend
+      context: ./CO2Map-Frontend
       dockerfile: Dockerfile.co2map
     restart: unless-stopped
     labels:
