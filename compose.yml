@@ -215,6 +215,8 @@ services:
       context: ./CO2Map-Frontend
       dockerfile: Dockerfile.co2map
     restart: unless-stopped
+    ports:
+      - "8085:80"
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.co2map-${COMPOSE_PROJECT_NAME}.rule=Host(`${CO2MAP_DOMAIN}`)"
